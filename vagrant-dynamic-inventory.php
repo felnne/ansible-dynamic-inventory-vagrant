@@ -1,0 +1,225 @@
+<?php
+
+/*
+ * Vagrant dynamic inventory for Ansible
+ * The output of this script is a valid Ansible inventory for the hosts defined in a running Vagrant environment
+ * This environment must be running for this script to be useful, i.e. you have already ran "$ vagrant up"
+ *
+ * Maintainer: Felix Fennell <felnne@bas.ac.uk>, Web & Applications Team <webapps@bas.ac.uk>, British Antarctic Survey
+ * Note: This script is a proof-of-concept!
+*/
+
+/*
+ * Start with script input
+ * Normally this would come from calling "$vagrant ssh-config --machine-readable" from the relevant directory
+ */
+$input = [
+    "1455442952,pristine-dev-node1,metadata,provider,vmware_fusion",
+    "1455442952,pristine-dev-node2,metadata,provider,vmware_fusion",
+    "1455442952,pristine-dev-node1,ssh-config,Host pristine-dev-node1\n  HostName 172.16.147.136\n  User vagrant\n  Port 22\n  UserKnownHostsFile /dev/null\n  StrictHostKeyChecking no\n  PasswordAuthentication no\n  IdentityFile \"/Users/felnne/Projects/WebApps/Web-Applications-Project-Template/.vagrant/machines/pristine-dev-node1/vmware_fusion/private_key\"\n  IdentitiesOnly yes\n  LogLevel FATAL\n
+Host pristine-dev-node1
+  HostName 172.16.147.136
+  User vagrant
+  Port 22
+  UserKnownHostsFile /dev/null
+  StrictHostKeyChecking no
+  PasswordAuthentication no
+  IdentityFile \"/Users/felnne/Projects/WebApps/Web-Applications-Project-Template/.vagrant/machines/pristine-dev-node1/vmware_fusion/private_key\"
+  IdentitiesOnly yes
+  LogLevel FATAL
+",
+    "1455442952,,ui,error,The provider for this Vagrant-managed machine is reporting that it\nis not yet ready for SSH. Depending on your provider this can carry\ndifferent meanings. Make sure your machine is created and running and\ntry again. Additionally%!(VAGRANT_COMMA) check the output of `vagrant status` to verify\nthat the machine is in the state that you expect. If you continue to\nget this error message%!(VAGRANT_COMMA) please view the documentation for the provider\nyou're using.",
+    "1455442952,,error-exit,Vagrant::Errors::SSHNotReady,The provider for this Vagrant-managed machine is reporting that it\nis not yet ready for SSH. Depending on your provider this can carry\ndifferent meanings. Make sure your machine is created and running and\ntry again. Additionally%!(VAGRANT_COMMA) check the output of `vagrant status` to verify\nthat the machine is in the state that you expect. If you continue to\nget this error message%!(VAGRANT_COMMA) please view the documentation for the provider\nyou're using."
+    ];
+
+/*
+ * Setup the data-structures that will hold information about hosts and how to connect to them
+ * This is used to build the dynamic inventory for Ansible
+ *
+ * TODO: Use a class for this
+ */
+$hosts = [];
+
+/*
+ * Also setup data-structures for holding any errors or warnings encountered
+ * Fatal errors will be returned immediately, otherwise they will be returned at the end as comments in the inventory
+ *
+ * TODO: Add exceptions and logging support for this
+ */
+$errors = [];
+$warnings = [];
+
+/*
+ * Convert input from an array of 'serialised' fields to a multi-level array, to make processing easier
+ */
+$input2 = [];
+
+// TODO: Replace with 'map()'
+foreach($input as $line) {
+    $input2[] = explode(',', $line);
+}
+
+/*
+ * Decode each message from Vagrant to build up host information
+ * Any messages we don't understand, or which don't refer to a host, we save for later as we consider these errors
+ *
+ * The format of these messages is defined by Vagrant: https://www.vagrantup.com/docs/cli/machine-readable.html
+ *
+ * For each $message:
+ * - $message[0] will be a timestamp - we can ignore this
+ * - $message[1] will be the target, or hostname, we use this to select the relevant index in the $hosts array
+ * - $message[2] will be the type of message, we are only interested in "metadata" and "ssh-config" type messages
+ * - $message[3] will either be the metadata key, if the message type is "metadata", or ssh-config information if the
+ *   message type is "ssh-config"
+ * - Message[4] will be the value for the relevant metadata key
+ */
+
+/*
+ * First we filter out messages that don't have < 4 indexes (timestamp, target, type and data), as these are malformed
+ * We will check if the values for each of these indexes are set later, and deal with any malformed messages at the end
+ */
+$input3 = [];
+$malformedMessages = [];
+
+foreach($input2 as $message) {
+    if (count($message) >= 4) {
+        $input3[] = $message;
+    } else {
+        $malformedMessages[] = $message;
+    }
+}
+
+/*
+ * Next we filter out any messages that don't specify a host ($message[1]), as these are global messages or errors
+ * We will deal with any of these non-host specific messages at the end
+ */
+$input4 = [];
+$nonSpecificMessages = [];
+
+foreach($input3 as $message) {
+    if ($message[1] != '' && $message[1] != null) {
+        $input4[] = $message;
+    } else {
+        $nonSpecificMessages[] = $input4;
+    }
+}
+
+/*
+ * Next we filter out any messages that aren't of type 'metadata' or 'ssh-config', as these aren't interesting to us
+ * - 'metadata' messages contain the name of the provider for a VM (which we use as a group in the Ansible inventory)
+ * - 'ssh-config' messages contain the private key we need to connect to each host and need in the inventory
+ *
+ * For 'metadata' messages, $message[3] will be the metadata key, we filter this as well as we are only interested in
+ * the 'provider' key.
+ *
+ * We deal with any other, non-interesting, types of message, or non-interesting metadata messages at the end
+ */
+$input5 = [];
+$nonInterestingMessages = [];
+
+foreach($input4 as $message) {
+    // TODO: Convert to array of 'interestingMessageTypes'
+    if ($message[2] == 'metadata' || 'ssh-config') {
+
+        if ($message[2] == 'provider') {
+            // TODO: Convert to array of 'interestingMetadataKeys'
+            if ($message[3] == 'provider') {
+                $input5[] = $message;
+            } else {
+                $nonInterestingMessages[] = $message;
+            }
+        } else {
+            // This can only mean its of type 'ssh-config'
+            $input5[] = $message;
+        }
+    } else {
+        $nonInterestingMessages[] = $message;
+    }
+}
+
+/*
+ * Next we will build up an index of hosts which we have information for, from the messages we know relate to a host,
+ * and which are known to be interesting
+ */
+
+foreach ($input5 as $message) {
+    if (! array_key_exists($message[1], $hosts)) {
+        $hosts[$message[1]] = [];
+    }
+}
+
+/*
+ * Next we fill in information about each host from the interesting messages - we only know how to do this for metadata
+ * provider (i.e. metadata for the host's provider) and ssh-config type messages
+ *
+ * - For 'provider metadata', $message[4] is the provider for the host (e.g. 'vmware_fusion')
+ * - For 'ssh-config', $message[3] is the SSH configuration information (repeated twice in different forms)
+ */
+foreach ($input5 as $message) {
+    if ($message[2] == 'metadata' && $message[3] == 'provider') {
+
+        echo "\n (fill in) Metadata provider value message found! \n";
+        echo "\n (fill in VALUE) provider is: '".$message[4]."' \n";
+
+        // Record actual value for possible future use
+        $hosts[$message[1]]['provider_raw'] = $message[4];
+
+        // Normalise 'provider' value
+        if ($message[4] == 'vmware_fusion') {
+            $hosts[$message[1]]['provider'] = 'vmware_desktop';
+        }
+    } else if ($message[2] == 'ssh-config') {
+        // For some reason Vagrant gives the SSH connection information as both a string with newlines, and a formatted
+        // string. We don't actually care which is used, but we do care that everything ends up being repeated.
+        // We therefore ignore the second set of information by removing it.
+        $messageValue = explode('FATAL', $message[3]);
+        $messageValue = $messageValue[0];
+
+        // Get the name of the host (e.g. 'foo-dev-node1') which translates to the short hostname (e.g. unqualified)
+        $hosts[$message[1]]['hostname'] = ltrim(rtrim(get_string_between($messageValue, 'Host', 'HostName')));
+
+        // Get the path to the private key needed to connect to the host, which Vagrant will generate automatically
+        $hosts[$message[1]]['identity_file'] = ltrim(rtrim(str_replace('"', '', get_string_between($messageValue, 'IdentityFile', 'IdentitiesOnly'))));
+
+        // Generate a Fully Qualified Domain Name (FQDN) for the hostname by appending a common domain name
+        $domainName = '.v.m';
+
+        $hosts[$message[1]]['fqdn'] = $hosts[$message[1]]['hostname'] . $domainName;
+    }
+}
+
+/*
+ * Host information is now ready to be formatted as an Ansible inventory file
+ */
+
+// DEBUG output
+var_dump($hosts);
+
+// Util functions
+
+// Takes an input $string, and returns the substring between a $start string and a $end string
+// E.g. get_string_between('Foo Bar Baz', 'Foo', 'Baz') returns ' Bar ')
+// It is recommended to trim the return value of this function to remove leading/trailing spaces
+//
+// TODO: Convert to DocBlock
+function get_string_between($string, $start, $end){
+    $string = ' ' . $string;
+    $ini = strpos($string, $start);
+    if ($ini == 0) return '';
+    $ini += strlen($start);
+    $len = strpos($string, $end, $ini) - $ini;
+    return substr($string, $ini, $len);
+}
+
+// Takes an input $string, and returns it without leading/trailing spaces, and optionally, without single/double quotes
+// Quote stripping is enabled by default
+// E.g. trim_string(' "foo" bar ') returns 'foo bar'
+function trim_string($string, $strip_quotes = true) {
+    if ($strip_quotes) {
+        // Strip single or double quotes
+        $string = str_replace('"', '', str_replace("'", "", $string));
+    }
+
+    // Strip leading/trailing spaces
+    return ltrim(rtrim($string));
+}
