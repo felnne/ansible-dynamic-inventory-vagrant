@@ -1,42 +1,25 @@
 <?php
 
 /*
- * Vagrant dynamic inventory for Ansible
- * The output of this script is a valid Ansible inventory for the hosts defined in a running Vagrant environment
- * This environment must be running for this script to be useful, i.e. you have already ran "$ vagrant up"
+ * Vagrant Ansible dynamic inventory
+ *
+ * This script is designed to act as an Ansible dynamic inventory, each time it is run a instantaneous representation
+ * of the current Vagrant environment is returned.
  *
  * Maintainer: Felix Fennell <felnne@bas.ac.uk>, Web & Applications Team <webapps@bas.ac.uk>, British Antarctic Survey
+ *
  * Note: This script is a proof-of-concept!
+ * Note: A Vagrant environment needs to be running before running this script (i.e. you've already run '$ vagrant up')
+ * Note: If you want to see what this inventory will look like you can run this script directly.
 */
 
 /*
- * Start with script input
- * Normally this would come from calling "$vagrant ssh-config --machine-readable" from the relevant directory
+ * Initialisation
  */
-$input = [
-    "1455442952,pristine-dev-node1,metadata,provider,vmware_fusion",
-    "1455442952,pristine-dev-node2,metadata,provider,vmware_fusion",
-    "1455442952,pristine-dev-node1,ssh-config,Host pristine-dev-node1\n  HostName 172.16.147.136\n  User vagrant\n  Port 22\n  UserKnownHostsFile /dev/null\n  StrictHostKeyChecking no\n  PasswordAuthentication no\n  IdentityFile \"/Users/felnne/Projects/WebApps/Web-Applications-Project-Template/.vagrant/machines/pristine-dev-node1/vmware_fusion/private_key\"\n  IdentitiesOnly yes\n  LogLevel FATAL\n
-Host pristine-dev-node1
-  HostName 172.16.147.136
-  User vagrant
-  Port 22
-  UserKnownHostsFile /dev/null
-  StrictHostKeyChecking no
-  PasswordAuthentication no
-  IdentityFile \"/Users/felnne/Projects/WebApps/Web-Applications-Project-Template/.vagrant/machines/pristine-dev-node1/vmware_fusion/private_key\"
-  IdentitiesOnly yes
-  LogLevel FATAL
-",
-    "1455442952,,ui,error,The provider for this Vagrant-managed machine is reporting that it\nis not yet ready for SSH. Depending on your provider this can carry\ndifferent meanings. Make sure your machine is created and running and\ntry again. Additionally%!(VAGRANT_COMMA) check the output of `vagrant status` to verify\nthat the machine is in the state that you expect. If you continue to\nget this error message%!(VAGRANT_COMMA) please view the documentation for the provider\nyou're using.",
-    "1455442952,,error-exit,Vagrant::Errors::SSHNotReady,The provider for this Vagrant-managed machine is reporting that it\nis not yet ready for SSH. Depending on your provider this can carry\ndifferent meanings. Make sure your machine is created and running and\ntry again. Additionally%!(VAGRANT_COMMA) check the output of `vagrant status` to verify\nthat the machine is in the state that you expect. If you continue to\nget this error message%!(VAGRANT_COMMA) please view the documentation for the provider\nyou're using."
-    ];
 
 /*
  * Setup the data-structures that will hold information about hosts and how to connect to them
  * This is used to build the dynamic inventory for Ansible
- *
- * TODO: Use a class for this
  */
 $hosts = [];
 
@@ -50,7 +33,38 @@ $errors = [];
 $warnings = [];
 
 /*
- * Convert input from an array of 'serialised' fields to a multi-level array, to make processing easier
+ * Get output from Vagrant for use as input in this script
+ */
+
+/*
+ * Start by setting the working directory, this needs to be path that contains the 'Vagrantfile'
+ * Typically the 'Vagrantfile' will be in the root of a project, this script will be in 'provisioning/inventories'
+ * By default we will therefore default to '../../' to change to the project root
+ *
+ * As a backup we will also record the current working directory in case we need to change back to it in the future
+ */
+$startupWorkingDirectory = getcwd();
+$workingDirectory = '../../';
+
+// Debug
+$workingDirectory = '/Users/felnne/Projects/WebApps/Web-Applications-Project-Template/';
+
+chdir($workingDirectory);
+
+/*
+ * Now we can call the 'Vagrant ssh-config --machine-readable' command, this returns information on the current hosts
+ * including their name, provider ('virtualbox', 'vmware_fusion', etc.) and SSH details, such as the private key
+ */
+$vagrantOutput = shell_exec('vagrant ssh-config --machine-readable');
+
+/*
+ * Next we need to split the Vagrant output into lines, not all of which will make sense and will need filtering later
+ */
+$input = explode("\n", $vagrantOutput);
+
+/*
+ * Now convert each line from a 'serialised' array of fields, to a multi-dimensional array to make processing easier
+ * Again not all of these lines are valid messages
  */
 $input2 = [];
 
