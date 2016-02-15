@@ -74,18 +74,23 @@ foreach($input as $line) {
 }
 
 /*
- * Decode each message from Vagrant to build up host information
- * Any messages we don't understand, or which don't refer to a host, we save for later as we consider these errors
+ * Message validation
+ */
+
+/*
+ * Try to interpret each line of output from Vagrant as a 'message' to build up host information
+ * Any messages we don't understand (usually because they aren't a valid message), or which don't refer to a host,
+ * we save for potential processing in the future
  *
- * The format of these messages is defined by Vagrant: https://www.vagrantup.com/docs/cli/machine-readable.html
+ * The format of a valid message is defined by Vagrant: https://www.vagrantup.com/docs/cli/machine-readable.html
  *
- * For each $message:
- * - $message[0] will be a timestamp - we can ignore this
- * - $message[1] will be the target, or hostname, we use this to select the relevant index in the $hosts array
- * - $message[2] will be the type of message, we are only interested in "metadata" and "ssh-config" type messages
- * - $message[3] will either be the metadata key, if the message type is "metadata", or ssh-config information if the
+ * Each $message will consist of several properties:
+ * - $message[0] - timestamp - we can ignore this
+ * - $message[1] - target - AKA hostname, we use this to select the relevant index in the $hosts array
+ * - $message[2] - type - we are only interested in "metadata" and "ssh-config" type messages
+ * - $message[3] - data - either the metadata key, if the message type is "metadata", or ssh-config information if the
  *   message type is "ssh-config"
- * - Message[4] will be the value for the relevant metadata key
+ * - $message[4] - data - will be the value for the relevant metadata key, if the message type is "metadata"
  */
 
 /*
@@ -152,6 +157,10 @@ foreach($input4 as $message) {
 }
 
 /*
+ * Message processing
+ */
+
+/*
  * Next we will build up an index of hosts which we have information for, from the messages we know relate to a host,
  * and which are known to be interesting
  */
@@ -171,10 +180,6 @@ foreach ($input5 as $message) {
  */
 foreach ($input5 as $message) {
     if ($message[2] == 'metadata' && $message[3] == 'provider') {
-
-        echo "\n (fill in) Metadata provider value message found! \n";
-        echo "\n (fill in VALUE) provider is: '".$message[4]."' \n";
-
         // Record actual value for possible future use
         $hosts[$message[1]]['provider_raw'] = $message[4];
 
@@ -209,7 +214,10 @@ foreach ($input5 as $message) {
 // DEBUG output
 var_dump($hosts);
 
-// Util functions
+
+/*
+ * Utility functions
+ */
 
 // Takes an input $string, and returns the substring between a $start string and a $end string
 // E.g. get_string_between('Foo Bar Baz', 'Foo', 'Baz') returns ' Bar ')
