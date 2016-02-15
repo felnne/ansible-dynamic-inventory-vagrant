@@ -18,10 +18,15 @@
  */
 
 /*
- * Setup the data-structures that will hold information about hosts and how to connect to them
- * This is used to build the dynamic inventory for Ansible
+ * Setup the data-structure that will hold information about hosts and how to connect to them
+ * This is used to build host information in the dynamic inventory
  */
 $hosts = [];
+/*
+ * Set the data-structure that will hold information how hosts can be grouped together
+ * This is used to build group information in the dynamic inventory
+ */
+$groups = [];
 
 /*
  * Also setup data-structures for holding any errors or warnings encountered
@@ -208,6 +213,86 @@ foreach ($input5 as $message) {
 }
 
 /*
+ * Next we use the information we know about hosts and generate a series of groupings, which will be exposed as in the
+ * generated inventory as Ansible Groups - these include:
+ * - 'manager' (Vagrant in this case)
+ * - 'provider' (usually 'vmware' for BAS projects)
+ * - 'project' - this can be determined if the hostname is formatted according to WSR-1, otherwise skipped
+ * - 'environment' - this can be determined if the hostname is formatted according to WSR-1, otherwise skipped
+ * - 'instance' - this can be determined if the hostname is formatted according to WSR-1, otherwise skipped
+ * - 'node' - this can be determined if the hostname is formatted according to WSR-1, otherwise skipped
+ *
+ * Note: For groups which rely on WSR-1 formatted hostname's, groups are skipped if no suitable hostname's are found
+ */
+
+/*
+ * Since this is a Vagrant dynamic inventory, all hosts are assumed to be in part of a 'vagrant' group
+ */
+$groups['vagrant'] = [];
+
+//Hosts are added using their FQDN as an identifier
+// TODO: Use a map for this
+foreach ($hosts as $host) {
+    $groups['vagrant'][] = $host['fqdn'];
+}
+
+/*
+ * Vagrant tells us the provider for each host, so we can build a group for each provider
+ */
+foreach($hosts as $host) {
+    // Create group for provider if it does not already exist
+    if (! array_key_exists($host['provider'], $groups)) {
+        $groups[$host['provider']] = [];
+    }
+
+    $groups[$host['provider']][] = $host['fqdn'];
+}
+
+/*
+ * If a host uses a WSR-1 compliant hostname we can infer extra information about:
+ * - The project the host belongs to
+ * - The environment (dev/prod etc.) the host belongs to
+ * - The instance of the project (if applicable) the host belongs to
+ * - The function/purpose of the host and its index (i.e. 1 for the first database server, 2 for the second etc.)
+ *
+ * This can be used to make extra groups
+ */
+foreach ($hosts as $hostName => $hostDetails) {
+    $hostnameWSRDecoded = decode_wsr_1_hostname($hostName);
+    $hostnameNodeDecoded = decode_wsr_1_node($hostnameWSRDecoded['node']);
+
+    if ($hostnameWSRDecoded !== false) {
+        // Project
+        if (! array_key_exists($hostnameWSRDecoded['project'], $groups)) {
+            $groups[$hostnameWSRDecoded['project']] = [];
+        }
+        $groups[$hostnameWSRDecoded['project']][] = $hostName;
+
+        // Environment
+        if (! array_key_exists($hostnameWSRDecoded['environment'], $groups)) {
+            $groups[$hostnameWSRDecoded['environment']] = [];
+        }
+        $groups[$hostnameWSRDecoded['environment']][] = $hostName;
+
+        // Instance (if applicable)
+        if ($hostnameWSRDecoded['instance'] !== null) {
+            if (! array_key_exists($hostnameWSRDecoded['instance'], $groups)) {
+                $groups[$hostnameWSRDecoded['project']] = [];
+            }
+            $groups[$hostnameWSRDecoded['project']][] = $hostName;
+        }
+    }
+
+    if ($hostnameNodeDecoded !== false) {
+        // Node purpose
+        if (! array_key_exists($hostnameNodeDecoded['purpose'], $groups)) {
+            $groups[$hostnameNodeDecoded['purpose']] = [];
+        }
+        $groups[$hostnameNodeDecoded['purpose']][] = $hostName;
+    }
+}
+
+/*
  * Inventory construction
  */
 
@@ -242,6 +327,27 @@ foreach ($hosts as $host) {
 
     $inventory[] = $line;
 }
+
+/*
+ * Next we define the various groups we built earlier, if a group has no members (which can be hosts or other groups)
+ * we omit it
+ */
+$inventory[] = "";
+$inventory[] = '## Group definitions';
+
+// TODO: Replace with map()?
+foreach($groups as $groupName => $groupMembers) {
+    $inventory[] = '[' . $groupName . ']';
+
+    // Merge in members (hosts or group names) of group - empty or falsy values are omitted
+    $inventory = array_merge($inventory, array_filter($groupMembers));
+
+    // Add separator after each group
+    $inventory[] = '';
+}
+
+// Remove trailing separator
+array_pop($inventory);
 
 /*
  * End the inventory with an empty line
@@ -290,4 +396,122 @@ function strip_string($string, $strip_quotes = true, $strip_newlines = true) {
 
     // Strip leading/trailing spaces
     return ltrim(rtrim($string));
+}
+
+// Takes an input $hostname and determines if it is compliant with the WSR-1 hostname naming convention
+// If it is details on the project, environment, instance (if applicable) and node will be returned
+// If the hostname is not WSR-1 compliant a value of 'false' will be returned
+// If an instance is not defined, a null value will be set for that element
+//
+// E.g. decode_wsr_1_hostname('pristine-wonderment-of-the-ages-dev-felnne-db1') returns:
+// (Array - [Key] = value)
+//  [project]     = pristine-wonderment-of-the-ages
+//  [environment] = dev
+//  [instance]    = felnne
+//  [node]        = db1
+//
+// TODO: Convert to DocBlock
+function decode_wsr_1_hostname($hostname) {
+    $project = null;
+    $environment = null;
+    $instance = null;
+    $node = null;
+
+    // The list of valid values for the environment of a WSR-1 hostname are controlled
+    $validEnvironments = [
+        'dev',
+        'stage',
+        'test',
+        'demo',
+        'prod'
+    ];
+
+    // WSR-1 hostname's use '-' to separate elements
+    $elements = explode('-', $hostname);
+
+    // $project, $environment and $instance are required - so if there aren't at least this many elements this hostname
+    // is not WSR-1 compliant
+    if (count($elements) < 3) {
+        return false;
+    }
+
+    // The options for the $environment are a controlled list, and therefore predictable, we can then use the position
+    // of where the environment appears to workout the $project (which will come before the environment) and the
+    // $instance and $node which will appear afterwards
+
+    // First check a valid environment was used
+    if (empty(array_intersect($validEnvironments, $elements))) {
+        return false;
+    }
+
+    // Second find which environment is used and where is appears in the array
+    // TODO: Replace with map()?
+    $environmentIndex = false;
+    foreach ($validEnvironments as $validEnvironment) {
+        $environmentIndexInstance = array_search($validEnvironment, $elements);
+
+        if ($environmentIndexInstance !== false) {
+            $environmentIndex = $environmentIndexInstance;
+            $environment = $elements[$environmentIndex];
+        }
+    }
+
+    // Determine the project name by taking all hostname elements before the environment element
+    $project = implode('-', array_chunk($elements, $environmentIndex)[0]);
+
+    // Determine the project instance by taking the elements between the environment and the node (the last element)
+    $instanceElements = array_chunk($elements, $environmentIndex)[1];
+    array_pop($instanceElements);
+    array_shift($instanceElements);
+    // If there are any elements left, these are instance elements and should be combined together, otherwise omit
+    if (count($instanceElements) > 0) {
+        $instance = implode('-', $instanceElements);
+    }
+
+    // Determine the node name by taking the last element
+    $node = $elements[count($elements) - 1];
+
+    // We can now package up the WSR elements and return them as an array
+    $output = [
+        'project' => $project,
+        'environment' => $environment,
+        'instance' => $instance,
+        'node' => $node
+    ];
+    return $output;
+}
+
+// Takes an input $nodeName and if it is compliant with the WSR-1 hostname naming convention returns the name/purpose
+// (database server) of a node, and its index (3rd database server)
+// If the node name is not WSR-1 compliant a vale of 'false' will be returned
+//
+// E.g. decode_wsr_1_node('db1') returns:
+// (Array - [Key] = value)
+//  [purpose]     = db
+//  [index]       = 1
+//
+// TODO: Convert to DocBlock
+function decode_wsr_1_node($nodeName) {
+    if ($nodeName == null) {
+        return false;
+    }
+
+    // Split the node into the name/purpose part and index part
+    $nodeElements = preg_split('/(?=\d)/', $nodeName, 2);
+
+    // If there are more than two elements, something went wrong
+    if (count($nodeElements) > 2) {
+        return false;
+    }
+
+    // If either of the elements is empty, something went wrong
+    if (empty($nodeElements[0]) || empty($nodeElements[1])) {
+        return false;
+    }
+
+    // Return node information packaged as a array
+    return [
+        'purpose' => $nodeElements[0],
+        'index' => $nodeElements[1]
+    ];
 }
