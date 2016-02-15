@@ -195,10 +195,10 @@ foreach ($input5 as $message) {
         $messageValue = $messageValue[0];
 
         // Get the name of the host (e.g. 'foo-dev-node1') which translates to the short hostname (e.g. unqualified)
-        $hosts[$message[1]]['hostname'] = ltrim(rtrim(get_string_between($messageValue, 'Host', 'HostName')));
+        $hosts[$message[1]]['hostname'] = strip_string(get_string_between($messageValue, 'Host', 'HostName'));
 
         // Get the path to the private key needed to connect to the host, which Vagrant will generate automatically
-        $hosts[$message[1]]['identity_file'] = ltrim(rtrim(str_replace('"', '', get_string_between($messageValue, 'IdentityFile', 'IdentitiesOnly'))));
+        $hosts[$message[1]]['identity_file'] = strip_string(get_string_between($messageValue, 'IdentityFile', 'IdentitiesOnly'));
 
         // Generate a Fully Qualified Domain Name (FQDN) for the hostname by appending a common domain name
         $domainName = '.v.m';
@@ -234,12 +234,20 @@ function get_string_between($string, $start, $end){
 }
 
 // Takes an input $string, and returns it without leading/trailing spaces, and optionally, without single/double quotes
-// Quote stripping is enabled by default
-// E.g. trim_string(' "foo" bar ') returns 'foo bar'
-function trim_string($string, $strip_quotes = true) {
+// or new lines
+// Quote and new line stripping are enabled by default
+// E.g. trim_string(' "foo" \n bar ') returns 'foo bar'
+//
+// TODO: Convert to DocBlock
+function strip_string($string, $strip_quotes = true, $strip_newlines = true) {
     if ($strip_quotes) {
         // Strip single or double quotes
         $string = str_replace('"', '', str_replace("'", "", $string));
+    }
+    if ($strip_newlines) {
+        // Strip \n and \r
+        $string = str_replace('\n', '', str_replace("'", "", $string));
+        $string = str_replace('\r', '', str_replace("'", "", $string));
     }
 
     // Strip leading/trailing spaces
