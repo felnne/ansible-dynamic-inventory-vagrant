@@ -159,7 +159,7 @@ function get_valid_messages($messages, $invalidAsWarnings = false) {
 function get_host_specific_messages($messages, $nonSpecificAsWarnings = false) {
     $specificMessages = [];
 
-    foreach($messages as $message) {
+    foreach($messages as $index => $message) {
         // In the Vagrant machine readable format, $message[1] is possibly the host a message belongs to
         if (! empty($message[1])) {
             $specificMessages[] = $message;
@@ -195,7 +195,7 @@ function get_interesting_messages($messages, $nonInterestingAsWarnings = false) 
         'provider'
     ];
 
-    foreach ($messages as $message) {
+    foreach ($messages as $index => $message) {
         // In the Vagrant machine readable format, $message[2] is the type of message
         if (in_array($message[2], $interestingMessageTypes)) {
             // In the Vagrant machine readable format, if the message type is 'metadata', $message[3] is a key
@@ -336,7 +336,7 @@ function set_host_fqdn($host, $fqdnDomain) {
         return $host;
     }
 
-    // Create Fully Qualified Domain Name using the hostname and a common domain namw
+    // Create Fully Qualified Domain Name using the hostname and a common domain name
     $host['fqdn'] = $host['hostname'] . $fqdnDomain;
 
     return $host;
