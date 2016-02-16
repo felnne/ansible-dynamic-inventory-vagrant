@@ -14,350 +14,535 @@
 */
 
 /*
- * Initialisation
+ * Initialisation - Set up key data-structures
  */
 
-/*
- * Setup the data-structure that will hold information about hosts and how to connect to them
- * This is used to build host information in the dynamic inventory
- */
+// Hold information about hosts and how to connect to them - used to build host information in the dynamic inventory
 $hosts = [];
-/*
- * Set the data-structure that will hold information how hosts can be grouped together
- * This is used to build group information in the dynamic inventory
- */
+// Hold information how hosts can be grouped together - used to build group information in the dynamic inventory
 $groups = [];
+// Hold the contents of the dynamic inventory
+$inventory = [];
+// Back up of the initial working directory this script was ran in - in case this is needed in the future
+$startupWorkingDirectory = getcwd();
+// This needs to be path that contains the 'Vagrantfile' to be used as the input for this script
+// Typically this script will be in 'provisioning/inventories and the 'Vagrantfile' in the project root
+// The default for this variable switches to the project root so the 'Vagrantfile' is accessible
+$workingDirectory = '../../';
+// DEBUG - Override
+$workingDirectory = '/Users/felnne/Projects/WebApps/Web-Applications-Project-Template/';
+// When building details on hosts a Fully Qualified Domain Name is built using the hostname from Vagrant and this value
+$fqdnDomain = '.v.m';
 
-/*
- * Also setup data-structures for holding any errors or warnings encountered
- * Fatal errors will be returned immediately, otherwise they will be returned at the end as comments in the inventory
- *
- * TODO: Add exceptions and logging support for this
- */
-$errors = [];
+// Hold any errors or warnings encountered
+// Fatal errors will be returned immediately, otherwise they will be returned at the end as comments in the inventory
 $warnings = [];
 
 /*
- * Get output from Vagrant for use as input in this script
+ * Initialisation - Switch to working directory
  */
+
+switch_to_working_directory($workingDirectory);
 
 /*
- * Start by setting the working directory, this needs to be path that contains the 'Vagrantfile'
- * Typically the 'Vagrantfile' will be in the root of a project, this script will be in 'provisioning/inventories'
- * By default we will therefore default to '../../' to change to the project root
- *
- * As a backup we will also record the current working directory in case we need to change back to it in the future
+ * Message input - use Vagrant to generate script input and split this into 'messages' of information
  */
-$startupWorkingDirectory = getcwd();
-$workingDirectory = '../../';
-
-// Debug
-$workingDirectory = '/Users/felnne/Projects/WebApps/Web-Applications-Project-Template/';
-
-chdir($workingDirectory);
+$rawVagrantOutput = get_input_from_vagrant();
+$processedVagrantOutput = process_vagrant_output($rawVagrantOutput);
 
 /*
- * Now we can call the 'Vagrant ssh-config --machine-readable' command, this returns information on the current hosts
- * including their name, provider ('virtualbox', 'vmware_fusion', etc.) and SSH details, such as the private key
+ * Message validation - check each 'message' is valid and from these select only those we are interested in
+ * Note: The format of messages is controlled by Vagrant: https://www.vagrantup.com/docs/cli/machine-readable.html
  */
-$vagrantOutput = shell_exec('vagrant ssh-config --machine-readable');
+$validMessages = get_valid_messages($processedVagrantOutput);
+$specificMessages = get_host_specific_messages($validMessages);
+$interestingMessages = get_interesting_messages($specificMessages);
 
 /*
- * Next we need to split the Vagrant output into lines, not all of which will make sense and will need filtering later
+ * Message processing - use the data in each message to build up information on hosts and groups for the inventory
  */
-$input = explode("\n", $vagrantOutput);
+
+// Build up host information
+$hosts = get_hosts_from_messages($interestingMessages);
+$hosts = get_host_details_from_messages($hosts, $interestingMessages, $fqdnDomain);
+
+// Build up group information
+$groups = make_groups_from_hosts($hosts);
 
 /*
- * Now convert each line from a 'serialised' array of fields, to a multi-dimensional array to make processing easier
- * Again not all of these lines are valid messages
+ * Inventory construction - format the relevant information on hosts and groups into an Ansible compatible inventory
  */
-$input2 = [];
+$inventory = make_inventory($hosts, $groups, $inventoryName = 'vagrant');
 
-// TODO: Replace with 'map()'
-foreach($input as $line) {
-    $input2[] = explode(',', $line);
+/*
+ * Inventory output
+ */
+echo $inventory;
+
+
+
+/*
+ * Functions
+ */
+
+// Sets the working directory for this script, takes a $workDirectory to switch to
+// E.g. switch_to_working_directory('/srv/project/')
+//
+// TODO: Convert to DocBlock
+function switch_to_working_directory($workingDirectory) {
+    chdir($workingDirectory);
 }
 
-/*
- * Message validation
- */
+// Calls the Vagrant 'ssh-config' command to get information on machines (hosts) defined, including their name/hostname,
+// provider (e.g. VMware) and the private key needed for SSH
+// Returns a string containing the 'stdout' output from this command - this will need to be further processed before
+// it can be used as input in this script using 'process_vagrant_output()'
+//
+// E.g. get_input_from_vagrant()
+//
+// TODO: Convert to DocBlock
+function get_input_from_vagrant() {
+    return shell_exec('vagrant ssh-config --machine-readable');
+}
 
-/*
- * Try to interpret each line of output from Vagrant as a 'message' to build up host information
- * Any messages we don't understand (usually because they aren't a valid message), or which don't refer to a host,
- * we save for potential processing in the future
- *
- * The format of a valid message is defined by Vagrant: https://www.vagrantup.com/docs/cli/machine-readable.html
- *
- * Each $message will consist of several properties:
- * - $message[0] - timestamp - we can ignore this
- * - $message[1] - target - AKA hostname, we use this to select the relevant index in the $hosts array
- * - $message[2] - type - we are only interested in "metadata" and "ssh-config" type messages
- * - $message[3] - data - either the metadata key, if the message type is "metadata", or ssh-config information if the
- *   message type is "ssh-config"
- * - $message[4] - data - will be the value for the relevant metadata key, if the message type is "metadata"
- */
+// Takes raw stdout from Vagrant and converts it into a form that can be used as input for this script
+// Returns an array of potential Vagrant messages that can be fed into 'get_valid_messages()'
+//
+// E.g. process_vagrant_output($rawVagrantOutput)
+//
+// TODO: Convert to DocBlock
+function process_vagrant_output($rawVagrantOutput) {
+    // Split Vagrant output into lines
+    $arrayOfLines = explode("\n", $rawVagrantOutput);
 
-/*
- * First we filter out messages that don't have < 4 indexes (timestamp, target, type and data), as these are malformed
- * We will check if the values for each of these indexes are set later, and deal with any malformed messages at the end
- */
-$input3 = [];
-$malformedMessages = [];
+    // Convert each 'line' from a 'serialised' array of fields, to a multi-dimensional array to make processing easier
+    // Not all of these lines are valid messages
+    $arrayOfLinesWithFields = array_map(function($line) {
+        return explode(',', $line);
+    }, $arrayOfLines);
 
-foreach($input2 as $message) {
-    if (count($message) >= 4) {
-        $input3[] = $message;
-    } else {
-        $malformedMessages[] = $message;
+    return $arrayOfLinesWithFields;
+}
+
+// Takes an array of $messages, and returns an array of those considered valid
+// Any messages which don't validate are discarded, unless $invalidAsWarnings is 'true' to return them as warnings
+//
+// Messages are considered valid if have 4 or more elements (timestamp, target, type and data) as per the format defined
+// by Vagrant - the validity/suitability of the elements within each message elements is checked elsewhere
+//
+// E.g. get_valid_messages($processedVagrantOutput)
+//
+// TODO: Convert to DocBlock
+function get_valid_messages($messages, $invalidAsWarnings = false) {
+    $validMessages = [];
+
+    foreach($messages as $index => $message) {
+        if (count($message) >= 4) {
+            $validMessages[] = $message;
+        } else if ($invalidAsWarnings) {
+            $warnings[] = '[WARNING] Message: ' . $index . ' invalid - ' . var_export($message, $return = true);
+        }
     }
+
+    return $validMessages;
 }
 
-/*
- * Next we filter out any messages that don't specify a host ($message[1]), as these are global messages or errors
- * We will deal with any of these non-host specific messages at the end
- */
-$input4 = [];
-$nonSpecificMessages = [];
+// Takes an array of $messages, and returns an array of those which target a specific machine (host)
+// Any messages which aren't specific are discarded, unless $invalidAsWarnings is 'true' to return them as warnings
+//
+// Where a message is not specific to a host it is either an error, or a more general message, neither of which are of
+// use when building the inventory
+//
+// E.g. get_host_specific_messages($validMessages)
+//
+// TODO: Convert to DocBlock
+function get_host_specific_messages($messages, $nonSpecificAsWarnings = false) {
+    $specificMessages = [];
 
-foreach($input3 as $message) {
-    if ($message[1] != '' && $message[1] != null) {
-        $input4[] = $message;
-    } else {
-        $nonSpecificMessages[] = $input4;
+    foreach($messages as $message) {
+        // In the Vagrant machine readable format, $message[1] is possibly the host a message belongs to
+        if (! empty($message[1])) {
+            $specificMessages[] = $message;
+        } else if ($nonSpecificAsWarnings) {
+            $warnings[] = '[WARNING] Message: ' . $index . ' not specific to a host - ' . var_export($message, $return = true);
+        }
     }
+
+    return $specificMessages;
 }
 
-/*
- * Next we filter out any messages that aren't of type 'metadata' or 'ssh-config', as these aren't interesting to us
- * - 'metadata' messages contain the name of the provider for a VM (which we use as a group in the Ansible inventory)
- * - 'ssh-config' messages contain the private key we need to connect to each host and need in the inventory
- *
- * For 'metadata' messages, $message[3] will be the metadata key, we filter this as well as we are only interested in
- * the 'provider' key.
- *
- * We deal with any other, non-interesting, types of message, or non-interesting metadata messages at the end
- */
-$input5 = [];
-$nonInterestingMessages = [];
+// Takes an array of $messages, and returns an array of those that are of a type, and in some cases sub-type, that is
+// interesting or useful for building an Ansible inventory
+// Any messages which aren't interesting or useful are discarded, unless $nonInterestingAsWarnings is 'true' to return
+// them as warnings
+//
+// Message types are controlled values defined by Vagrant and are therefore predictable, the meaning of the data
+// elements(s) in a message are dictated by the message type. E.g. A 'metadata' type message uses 2 data elements.
+//
+// The message types this function considers interesting are set by '$interestingMessageTypes' and for metadata type
+// messages specifically, '$interestingMessageMetadataKeys' sets the metadata keys that are interesting for that type
+//
+// E.g. get_interesting_messages($specificMessages)
+//
+// TODO: Convert to DocBlock
+function get_interesting_messages($messages, $nonInterestingAsWarnings = false) {
+    $interestingMessages = [];
+    $interestingMessageTypes = [
+        'metadata',
+        'ssh-config'
+    ];
+    $interestingMessageMetadataKeys = [
+        'provider'
+    ];
 
-foreach($input4 as $message) {
-    // TODO: Convert to array of 'interestingMessageTypes'
-    if ($message[2] == 'metadata' || 'ssh-config') {
-
-        if ($message[2] == 'provider') {
-            // TODO: Convert to array of 'interestingMetadataKeys'
-            if ($message[3] == 'provider') {
-                $input5[] = $message;
-            } else {
-                $nonInterestingMessages[] = $message;
+    foreach ($messages as $message) {
+        // In the Vagrant machine readable format, $message[2] is the type of message
+        if (in_array($message[2], $interestingMessageTypes)) {
+            // In the Vagrant machine readable format, if the message type is 'metadata', $message[3] is a key
+            if ($message[2] == 'metadata' && in_array($message[3], $interestingMessageMetadataKeys)) {
+                $interestingMessages[] = $message;
+            } else if ($message[2] == 'ssh-config') {
+                $interestingMessages[] = $message;
+            } else if ($nonInterestingAsWarnings) {
+                $warnings[] = '[WARNING] Message: ' . $index . ' has a non-interesting metadata key - ' . var_export($message, $return = true);
             }
+        } else if ($nonInterestingAsWarnings) {
+            $warnings[] = '[WARNING] Message: ' . $index . ' is a non-interesting message type - ' . var_export($message, $return = true);
+        }
+    }
+
+    return $interestingMessages;
+}
+
+// Returns an array of hosts from the target host an array of $messages refers to
+// The hostname is used as the array key and once defined is not duplicated
+//
+// E.g. get_hosts_from_messages($interestingMessages)
+//
+// TODO: Convert to DocBlock
+function get_hosts_from_messages($messages) {
+    $hosts = [];
+
+    foreach ($messages as $message) {
+        if (! array_key_exists($message[1], $hosts)) {
+            $hosts[$message[1]] = [];
+        }
+    }
+
+    return $hosts;
+}
+
+// Updates an array of $hosts with information filled in from an array of $messages
+// Each item of information is decoded and added to a host using a separate function, which this function will call
+//
+// Some of these functions require additional information as this is not present in the information from messages
+// Consequently, these additional arguments will need to be passed to this function:
+// * $fqdnDomain - A domain name, needed to add Fully Qualified Domain Names to hosts, otherwise the hostname is used
+//
+// E.g. get_host_details_from_messages($hosts, $interestingMessages, $fqdnDomain = '.example.com')
+//
+// TODO: Convert to DocBlock
+function get_host_details_from_messages($hosts, $messages, $fqdnDomain = null) {
+    foreach ($messages as $message) {
+        // For each message select the host it refers to
+        $host = $hosts[$message[1]];
+
+        // Each message will only apply to one of these functions - this function does not know which messages belong
+        // to which functions deliberately so as to make changing or adding functions as simple as possible
+        $host = get_host_provider($host, $message);
+        $host = get_host_hostname($host, $message);
+        $host = get_host_identity_file($host, $message);
+
+        // These functions set additional information using pre-defined values, or values derived from existing values
+        $host = set_host_fqdn($host, $fqdnDomain);
+
+        // Persist the updated host
+        $hosts[$message[1]] = $host;
+    }
+
+    return $hosts;
+}
+
+// Decodes the provider (e.g. 'VMware') for a $host from a suitable $message
+//
+// E.g. get_host_provider($host, $message)
+//
+// TODO: Convert to DocBlock
+function get_host_provider($host, $message) {
+    if ($message[2] != 'metadata' && $message[3] != 'provider') {
+        return $host;
+    }
+
+    // Record actual value for possible future use
+    $host['provider_raw'] = $message[4];
+
+    // Normalise 'provider' value
+    if ($message[4] == 'vmware_fusion') {
+        $host['provider'] = 'vmware_desktop';
+    }
+
+    return $host;
+}
+
+// Decodes the hostname for a $host from a suitable $message
+//
+// E.g. get_host_hostname($host, $message)
+//
+// TODO: Convert to DocBlock
+function get_host_hostname($host, $message) {
+    if ($message[2] != 'ssh-config') {
+        return $host;
+    }
+
+    // For some reason Vagrant gives the SSH connection information as both a string with newlines, and a formatted
+    // string. We don't actually care which is used, but we do care that everything ends up being repeated.
+    // We therefore ignore the second set of information by removing it.
+    $messageValue = explode('FATAL', $message[3])[0];
+
+    // Get the name of the host (e.g. 'foo-dev-node1') which translates to the short hostname (e.g. unqualified)
+    $host['hostname'] = strip_string(get_string_between($messageValue, 'Host', 'HostName'));
+
+    return $host;
+}
+
+// Decodes the identity file (SSH private key) for a $host from a suitable $message
+//
+// E.g. get_host_identity_file($host, $message)
+//
+// TODO: Convert to DocBlock
+function get_host_identity_file($host, $message) {
+    if ($message[2] != 'ssh-config') {
+        return $host;
+    }
+
+    // For some reason Vagrant gives the SSH connection information as both a string with newlines, and a formatted
+    // string. We don't actually care which is used, but we do care that everything ends up being repeated.
+    // We therefore ignore the second set of information by removing it.
+    $messageValue = explode('FATAL', $message[3])[0];
+
+    // Get the path to the private key needed to connect to the host, which Vagrant will generate automatically
+    $host['identity_file'] = strip_string(get_string_between($messageValue, 'IdentityFile', 'IdentitiesOnly'));
+
+    return $host;
+}
+
+// Generates a Fully Qualified Domain Name for a $host from its hostname and a given domain name
+//
+// E.g. set_host_fqdn($host, '.example.com')
+//
+// TODO: Convert to DocBlock
+function set_host_fqdn($host, $fqdnDomain) {
+    if (! array_key_exists('hostname', $host) && empty($host['hostname'])) {
+        return $host;
+    }
+
+    // Create Fully Qualified Domain Name using the hostname and a common domain namw
+    $host['fqdn'] = $host['hostname'] . $fqdnDomain;
+
+    return $host;
+}
+
+// Returns an array of $groups based on information from an array of $hosts
+// Each group is built using a separate function, which this function will call
+//
+// Some of these functions require additional information as this is not present in the information from hosts
+// Consequently, these additional arguments will need to be passed to this function:
+// * $manager - Needed to add groups for the host manager (e.g. Vagrant), defaults to 'vagrant'
+//
+// E.g. make_groups_from_hosts($hosts, $interestingMessages, $nameForManagerGroup = 'vagrant')
+//
+// TODO: Convert to DocBlock
+function make_groups_from_hosts($hosts, $nameForManagerGroup = 'vagrant') {
+    $groups = [];
+
+    $groups = make_manager_group($hosts, $groups, $nameForManagerGroup);
+    $groups = make_providers_group($hosts, $groups);
+    $groups = make_wsr_1_element_groups($hosts, $groups);
+
+    return $groups;
+}
+
+// Creates a group, within an array of $groups, containing all $hosts, for a given $manager (e.g. 'vagrant')
+// I.e. all hosts are added to group named after a given manager
+// Returns the array of groups passed in, including the additional group created by this function
+//
+// E.g. make_manager_group($hosts, $groups, $manager = 'vagrant')
+//
+// TODO: Convert to DocBlock
+function make_manager_group($hosts, $groups, $manager) {
+    if (! array_key_exists($manager, $groups)) {
+        $groups[$manager] = [];
+    }
+
+    foreach ($hosts as $host) {
+        $groups[$manager][] = $host['fqdn'];
+    }
+
+    return $groups;
+}
+
+// Creates groups, within an array of $groups, for each host provider for an array of $hosts
+// I.e. all hosts using provider A are placed in a group for provider, all hosts using provider B etc.
+// Returns the array of groups passed in, including the additional groups created by this function
+//
+// E.g. make_providers_group($hosts, $groups)
+//
+// TODO: Convert to DocBlock
+function make_providers_group($hosts, $groups) {
+    foreach ($hosts as $host) {
+        if (array_key_exists('provider', $host)) {
+            if (! array_key_exists($host['provider'], $groups)) {
+                $groups[$host['provider']] = [];
+            }
+
+            $groups[$host['provider']][] = $host['fqdn'];
+        }
+    }
+
+    return $groups;
+}
+
+// Creates groups, within an array of $groups, for each element with a WSR-1 formatted hostname for an array of $hosts
+// I.e. if a host has a WSR-1 formatted hostname, groups for the elements in that hostname are created
+// Returns the array of groups passed in, including the additional groups created by this function
+//
+// E.g. make_wsr_1_element_groups($hosts, $groups)
+//
+// TODO: Convert to DocBlock
+function make_wsr_1_element_groups($hosts, $groups) {
+    $wsr1Elements = [
+        'project',
+        'environment',
+        'instance',
+        'purpose'
+    ];
+
+    foreach ($hosts as $hostName => $hostDetails) {
+        $hostnameWSRDecoded = decode_wsr_1_hostname($hostName);
+
+        // Skip over hosts without a WSR-1 hostname
+        if (! $hostnameWSRDecoded) {
+            continue;
+        }
+
+        foreach ($wsr1Elements as $element) {
+            // Skip over WSR-1 elements that are not defined (usually only applies to 'instance')
+            if (empty($hostnameWSRDecoded[$element])) {
+                continue;
+            }
+
+            if (! array_key_exists($hostnameWSRDecoded[$element], $groups)) {
+                $groups[$hostnameWSRDecoded[$element]] = [];
+            }
+            $groups[$hostnameWSRDecoded[$element]][] = $hostDetails['fqdn'];
+        }
+    }
+
+    return $groups;
+}
+
+// Builds an Ansible formatted inventory for an array of $hosts and $groups named with a specific $inventoryName
+// The inventory is built in sections, with each section using a separate function, called by this function
+// The inventory is built as an array but returned as a string by imploding the array with a new line character as glue
+//
+// E.g. make_inventory($hosts, $groups, $inventoryName = 'Vagrant');
+//
+// TODO: Convert to DocBlock
+function make_inventory($hosts, $groups, $inventoryName) {
+    $inventory = [];
+
+    // Start with an introduction
+    $inventory = array_merge($inventory, make_inventory_introduction($inventoryName));
+
+    // Next add host information
+    // (fqdn & identity file)
+    $inventory = array_merge($inventory, make_inventory_hosts($hosts));
+
+    // Next add group information
+    $inventory = array_merge($inventory, make_inventory_groups($groups));
+
+    // End the inventory with an empty line
+    $inventory[] = "\n";
+
+    // Convert the inventory to a new-line joined string
+    $inventory = implode("\n", $inventory);
+
+    return $inventory;
+}
+
+// Outputs the $inventoryName of an inventory and other general information about dynamic inventories
+// This function is designed to be called by 'make_inventory()' and will return a partial inventory array
+//
+// E.g. make_inventory_introduction($inventoryName = 'Vagrant');
+//
+// TODO: Convert to DocBlock
+function make_inventory_introduction($inventoryName) {
+    $inventory = [];
+
+    $inventory[] = '# ' . $inventoryName . ' - Ansible dynamic inventory';
+    $inventory[] = '# The contents of this inventory are generated by a script, do not modify manually';
+
+    return $inventory;
+}
+
+// Outputs host information for an array of $hosts, including their FQDN (or hostname) and identity file
+// This function is designed to be called by 'make_inventory()' and will return a partial inventory array
+//
+// E.g. make_inventory_hosts($hosts);
+//
+// TODO: Convert to DocBlock
+function make_inventory_hosts($hosts) {
+    $inventory = [];
+
+    $inventory[] = "\n";
+    $inventory[] = '## Hosts';
+
+    foreach ($hosts as $hostName => $hostDetails) {
+        // Prefer a FQDN over a hostname
+        if (array_key_exists('fqdn', $hostDetails)) {
+            $line = $hostDetails['fqdn'];
         } else {
-            // This can only mean its of type 'ssh-config'
-            $input5[] = $message;
+            $line = $hostName;
         }
-    } else {
-        $nonInterestingMessages[] = $message;
-    }
-}
 
-/*
- * Message processing
- */
-
-/*
- * Next we will build up an index of hosts which we have information for, from the messages we know relate to a host,
- * and which are known to be interesting
- */
-
-foreach ($input5 as $message) {
-    if (! array_key_exists($message[1], $hosts)) {
-        $hosts[$message[1]] = [];
-    }
-}
-
-/*
- * Next we fill in information about each host from the interesting messages - we only know how to do this for metadata
- * provider (i.e. metadata for the host's provider) and ssh-config type messages
- *
- * - For 'provider metadata', $message[4] is the provider for the host (e.g. 'vmware_fusion')
- * - For 'ssh-config', $message[3] is the SSH configuration information (repeated twice in different forms)
- */
-foreach ($input5 as $message) {
-    if ($message[2] == 'metadata' && $message[3] == 'provider') {
-        // Record actual value for possible future use
-        $hosts[$message[1]]['provider_raw'] = $message[4];
-
-        // Normalise 'provider' value
-        if ($message[4] == 'vmware_fusion') {
-            $hosts[$message[1]]['provider'] = 'vmware_desktop';
+        // If an identity file is defined append to the host definition
+        if (array_key_exists('identity_file', $hostDetails) && $hostDetails['identity_file'] != '') {
+            $line .= " ansible_ssh_private_key_file='" . $hostDetails['identity_file'] . "'";
         }
-    } else if ($message[2] == 'ssh-config') {
-        // For some reason Vagrant gives the SSH connection information as both a string with newlines, and a formatted
-        // string. We don't actually care which is used, but we do care that everything ends up being repeated.
-        // We therefore ignore the second set of information by removing it.
-        $messageValue = explode('FATAL', $message[3]);
-        $messageValue = $messageValue[0];
 
-        // Get the name of the host (e.g. 'foo-dev-node1') which translates to the short hostname (e.g. unqualified)
-        $hosts[$message[1]]['hostname'] = strip_string(get_string_between($messageValue, 'Host', 'HostName'));
-
-        // Get the path to the private key needed to connect to the host, which Vagrant will generate automatically
-        $hosts[$message[1]]['identity_file'] = strip_string(get_string_between($messageValue, 'IdentityFile', 'IdentitiesOnly'));
-
-        // Generate a Fully Qualified Domain Name (FQDN) for the hostname by appending a common domain name
-        $domainName = '.v.m';
-
-        $hosts[$message[1]]['fqdn'] = $hosts[$message[1]]['hostname'] . $domainName;
-    }
-}
-
-/*
- * Next we use the information we know about hosts and generate a series of groupings, which will be exposed as in the
- * generated inventory as Ansible Groups - these include:
- * - 'manager' (Vagrant in this case)
- * - 'provider' (usually 'vmware' for BAS projects)
- * - 'project' - this can be determined if the hostname is formatted according to WSR-1, otherwise skipped
- * - 'environment' - this can be determined if the hostname is formatted according to WSR-1, otherwise skipped
- * - 'instance' - this can be determined if the hostname is formatted according to WSR-1, otherwise skipped
- * - 'node' - this can be determined if the hostname is formatted according to WSR-1, otherwise skipped
- *
- * Note: For groups which rely on WSR-1 formatted hostname's, groups are skipped if no suitable hostname's are found
- */
-
-/*
- * Since this is a Vagrant dynamic inventory, all hosts are assumed to be in part of a 'vagrant' group
- */
-$groups['vagrant'] = [];
-
-//Hosts are added using their FQDN as an identifier
-// TODO: Use a map for this
-foreach ($hosts as $host) {
-    $groups['vagrant'][] = $host['fqdn'];
-}
-
-/*
- * Vagrant tells us the provider for each host, so we can build a group for each provider
- */
-foreach($hosts as $host) {
-    // Create group for provider if it does not already exist
-    if (! array_key_exists($host['provider'], $groups)) {
-        $groups[$host['provider']] = [];
+        $inventory[] = $line;
     }
 
-    $groups[$host['provider']][] = $host['fqdn'];
+    return $inventory;
 }
 
-/*
- * If a host uses a WSR-1 compliant hostname we can infer extra information about:
- * - The project the host belongs to
- * - The environment (dev/prod etc.) the host belongs to
- * - The instance of the project (if applicable) the host belongs to
- * - The function/purpose of the host and its index (i.e. 1 for the first database server, 2 for the second etc.)
- *
- * This can be used to make extra groups
- */
-foreach ($hosts as $hostName => $hostDetails) {
-    $hostnameWSRDecoded = decode_wsr_1_hostname($hostName);
-    $hostnameNodeDecoded = decode_wsr_1_node($hostnameWSRDecoded['node']);
+// Outputs group information for an array of $groups
+// This function is designed to be called by 'make_inventory()' and will return a partial inventory array
+//
+// E.g. make_inventory_groups($groups);
+//
+// TODO: Convert to DocBlock
+function make_inventory_groups($groups) {
+    $inventory = [];
 
-    if ($hostnameWSRDecoded !== false) {
-        // Project
-        if (! array_key_exists($hostnameWSRDecoded['project'], $groups)) {
-            $groups[$hostnameWSRDecoded['project']] = [];
-        }
-        $groups[$hostnameWSRDecoded['project']][] = $hostName;
+    $inventory[] = "\n";
+    $inventory[] = '## Groups';
 
-        // Environment
-        if (! array_key_exists($hostnameWSRDecoded['environment'], $groups)) {
-            $groups[$hostnameWSRDecoded['environment']] = [];
-        }
-        $groups[$hostnameWSRDecoded['environment']][] = $hostName;
+    foreach($groups as $groupName => $groupMembers) {
+        $inventory[] = '[' . $groupName . ']';
 
-        // Instance (if applicable)
-        if ($hostnameWSRDecoded['instance'] !== null) {
-            if (! array_key_exists($hostnameWSRDecoded['instance'], $groups)) {
-                $groups[$hostnameWSRDecoded['project']] = [];
-            }
-            $groups[$hostnameWSRDecoded['project']][] = $hostName;
-        }
+        // Merge in members (hosts or group names) of group - empty or falsy values are omitted
+        $inventory = array_merge($inventory, array_filter($groupMembers));
+
+        // Add separator after each group
+        $inventory[] = '';
     }
 
-    if ($hostnameNodeDecoded !== false) {
-        // Node purpose
-        if (! array_key_exists($hostnameNodeDecoded['purpose'], $groups)) {
-            $groups[$hostnameNodeDecoded['purpose']] = [];
-        }
-        $groups[$hostnameNodeDecoded['purpose']][] = $hostName;
-    }
+    // Remove trailing separator
+    array_pop($inventory);
+
+    return $inventory;
 }
-
-/*
- * Inventory construction
- */
-
-/*
- * The inventory will be built using an array to make adding construction easier, each array item can be considered a
- * line in the resulting string representation of the array, which is generated using 'implode()'
- */
-$inventory = [];
-
-/*
- * First some minimal 'introduction' comments
- */
-$inventory[] = '# Ansible Vagrant dynamic inventory';
-$inventory[] = '# The contents of this inventory are generated by a script, do not modify manually';
-
-/*
- * Next we define details on each host, specifically their FQDN and the SSH private key (identity file)
- *
- * Note: Roles such as 'barc-ansible-roles-collection.system-hostname' (based on 'ANXS.hostname') will automatically
- *       set a relevant hostname based on the host's FQDN
- */
-$inventory[] = "\n";
-$inventory[] = '## Host definitions';
-
-foreach ($hosts as $host) {
-    $line = $host['fqdn'];
-
-    // If an identity file is defined append to the host definition
-    if (array_key_exists('identity_file', $host) && $host['identity_file'] != '') {
-        $line .= " ansible_ssh_private_key_file='" . $host['identity_file'] . "'";
-    }
-
-    $inventory[] = $line;
-}
-
-/*
- * Next we define the various groups we built earlier, if a group has no members (which can be hosts or other groups)
- * we omit it
- */
-$inventory[] = "";
-$inventory[] = '## Group definitions';
-
-// TODO: Replace with map()?
-foreach($groups as $groupName => $groupMembers) {
-    $inventory[] = '[' . $groupName . ']';
-
-    // Merge in members (hosts or group names) of group - empty or falsy values are omitted
-    $inventory = array_merge($inventory, array_filter($groupMembers));
-
-    // Add separator after each group
-    $inventory[] = '';
-}
-
-// Remove trailing separator
-array_pop($inventory);
-
-/*
- * End the inventory with an empty line
- */
-$inventory[] = "\n";
-
-/*
- * Finally, output the inventory as an imploded array glued with new lines
- */
-echo implode("\n", $inventory);
 
 /*
  * Utility functions
@@ -401,7 +586,7 @@ function strip_string($string, $strip_quotes = true, $strip_newlines = true) {
 // Takes an input $hostname and determines if it is compliant with the WSR-1 hostname naming convention
 // If it is details on the project, environment, instance (if applicable) and node will be returned
 // If the hostname is not WSR-1 compliant a value of 'false' will be returned
-// If an instance is not defined, a null value will be set for that element
+// If any element is not defined, a null value will be set for that element
 //
 // E.g. decode_wsr_1_hostname('pristine-wonderment-of-the-ages-dev-felnne-db1') returns:
 // (Array - [Key] = value)
@@ -409,13 +594,18 @@ function strip_string($string, $strip_quotes = true, $strip_newlines = true) {
 //  [environment] = dev
 //  [instance]    = felnne
 //  [node]        = db1
+//  [purpose]     = db
+//  [index]       = 1
 //
 // TODO: Convert to DocBlock
+// TODO: Refactor this
 function decode_wsr_1_hostname($hostname) {
     $project = null;
     $environment = null;
     $instance = null;
     $node = null;
+    $purpose = null;
+    $index = null;
 
     // The list of valid values for the environment of a WSR-1 hostname are controlled
     $validEnvironments = [
@@ -471,12 +661,25 @@ function decode_wsr_1_hostname($hostname) {
     // Determine the node name by taking the last element
     $node = $elements[count($elements) - 1];
 
+    // Further decode the node type
+    $nodeDecoded = decode_wsr_1_node_type($node);
+    if ($nodeDecoded !== false && is_array($nodeDecoded)) {
+        if (array_key_exists('purpose', $nodeDecoded) && ! empty($nodeDecoded['purpose'])) {
+            $purpose = $nodeDecoded['purpose'];
+        }
+        if (array_key_exists('index', $nodeDecoded) && ! empty($nodeDecoded['index'])) {
+            $index = $nodeDecoded['index'];
+        }
+    }
+
     // We can now package up the WSR elements and return them as an array
     $output = [
         'project' => $project,
         'environment' => $environment,
         'instance' => $instance,
-        'node' => $node
+        'node' => $node,
+        'purpose' => $purpose,
+        'index' => $index
     ];
     return $output;
 }
@@ -491,7 +694,7 @@ function decode_wsr_1_hostname($hostname) {
 //  [index]       = 1
 //
 // TODO: Convert to DocBlock
-function decode_wsr_1_node($nodeName) {
+function decode_wsr_1_node_type($nodeName) {
     if ($nodeName == null) {
         return false;
     }
