@@ -91,7 +91,8 @@ echo $inventory;
  *
  * @example switch_to_working_directory('/srv/project/');
  */
-function switch_to_working_directory($workingDirectory) {
+function switch_to_working_directory($workingDirectory)
+{
     chdir($workingDirectory);
 }
 
@@ -107,7 +108,8 @@ function switch_to_working_directory($workingDirectory) {
  *
  * @example get_input_from_vagrant();
  */
-function get_input_from_vagrant() {
+function get_input_from_vagrant()
+{
     return shell_exec('vagrant ssh-config --machine-readable');
 }
 
@@ -122,13 +124,14 @@ function get_input_from_vagrant() {
  *
  * @example process_vagrant_output($rawVagrantOutput);
  */
-function process_vagrant_output($rawVagrantOutput) {
+function process_vagrant_output($rawVagrantOutput)
+{
     // Split Vagrant output into lines
     $arrayOfLines = explode("\n", $rawVagrantOutput);
 
     // Convert each 'line' from a 'serialised' array of fields, to a multi-dimensional array to make processing easier
     // Not all of these lines are valid messages
-    $arrayOfLinesWithFields = array_map(function($line) {
+    $arrayOfLinesWithFields = array_map(function ($line) {
         return explode(',', $line);
     }, $arrayOfLines);
 
@@ -150,13 +153,14 @@ function process_vagrant_output($rawVagrantOutput) {
  *
  * @example get_valid_messages($processedVagrantOutput);
  */
-function get_valid_messages(array $messages, $invalidAsWarnings = false) {
+function get_valid_messages(array $messages, $invalidAsWarnings = false)
+{
     $validMessages = [];
 
-    foreach($messages as $index => $message) {
+    foreach ($messages as $index => $message) {
         if (count($message) >= 4) {
             $validMessages[] = $message;
-        } else if ($invalidAsWarnings) {
+        } elseif ($invalidAsWarnings) {
             $warnings[] = '[WARNING] Message: ' . $index . ' invalid - ' . var_export($message, $return = true);
         }
     }
@@ -179,15 +183,16 @@ function get_valid_messages(array $messages, $invalidAsWarnings = false) {
  *
  * @example get_host_specific_messages($specificMessages);
  */
-function get_host_specific_messages(array $messages, $nonSpecificAsWarnings = false) {
+function get_host_specific_messages(array $messages, $nonSpecificAsWarnings = false)
+{
     $specificMessages = [];
 
-    foreach($messages as $index => $message) {
+    foreach ($messages as $index => $message) {
         // In the Vagrant machine readable format, $message[1] is possibly the host a message belongs to
         if (! empty($message[1])) {
             $specificMessages[] = $message;
-        } else if ($nonSpecificAsWarnings) {
-            $warnings[] = '[WARNING] Message: ' . $index . ' not specific to a host - ' . var_export($message, $return = true);
+        } elseif ($nonSpecificAsWarnings) {
+            $warnings[] = make_warning('Message: ' . $index . ' not specific to a host - ', $item = $message);
         }
     }
 
@@ -212,12 +217,13 @@ function get_host_specific_messages(array $messages, $nonSpecificAsWarnings = fa
  * @see get_host_details_from_messages() For gathering details about hosts specified in a set of messages
  *
  * @param array $messages A set of messages, ideally known to be specific to a host
- * @param bool $nonInterestingAsWarnings If 'true', return non-interesting messages as warnings, otherwise they are discarded
+ * @param bool $nonInterestingAsWarnings If 'true', return non-interesting messages as warnings, otherwise discarded
  * @return array A set of messages which are interesting for building an inventory
  *
  * @example get_interesting_messages($specificMessages);
  */
-function get_interesting_messages(array $messages, $nonInterestingAsWarnings = false) {
+function get_interesting_messages(array $messages, $nonInterestingAsWarnings = false)
+{
     $interestingMessages = [];
     $interestingMessageTypes = [
         'metadata',
@@ -233,13 +239,13 @@ function get_interesting_messages(array $messages, $nonInterestingAsWarnings = f
             // In the Vagrant machine readable format, if the message type is 'metadata', $message[3] is a key
             if ($message[2] == 'metadata' && in_array($message[3], $interestingMessageMetadataKeys)) {
                 $interestingMessages[] = $message;
-            } else if ($message[2] == 'ssh-config') {
+            } elseif ($message[2] == 'ssh-config') {
                 $interestingMessages[] = $message;
-            } else if ($nonInterestingAsWarnings) {
-                $warnings[] = '[WARNING] Message: ' . $index . ' has a non-interesting metadata key - ' . var_export($message, $return = true);
+            } elseif ($nonInterestingAsWarnings) {
+                $warnings[] = make_warning('Message: ' . $index . ' non-interesting metadata key - ', $item = $message);
             }
-        } else if ($nonInterestingAsWarnings) {
-            $warnings[] = '[WARNING] Message: ' . $index . ' is a non-interesting message type - ' . var_export($message, $return = true);
+        } elseif ($nonInterestingAsWarnings) {
+            $warnings[] = make_warning('Message: ' . $index . ' non-interesting message type - ', $item = $message);
         }
     }
 
@@ -261,7 +267,8 @@ function get_interesting_messages(array $messages, $nonInterestingAsWarnings = f
  *
  * @example get_hosts_from_messages($interestingMessages);
  */
-function get_hosts_from_messages(array $messages) {
+function get_hosts_from_messages(array $messages)
+{
     $hosts = [];
 
     foreach ($messages as $message) {
@@ -300,7 +307,8 @@ function get_hosts_from_messages(array $messages) {
  *
  * @example get_host_details_from_messages($hosts, $interestingMessages, $fqdnDomain = 'example.com');
  */
-function get_host_details_from_messages(array $hosts, array $messages, $fqdnDomain = null) {
+function get_host_details_from_messages(array $hosts, array $messages, $fqdnDomain = null)
+{
     foreach ($messages as $message) {
         // For each message select the host it refers to
         $host = $hosts[$message[1]];
@@ -337,7 +345,8 @@ function get_host_details_from_messages(array $hosts, array $messages, $fqdnDoma
  *
  * @example get_host_provider($host, $message);
  */
-function get_host_provider(array $host, array $message) {
+function get_host_provider(array $host, array $message)
+{
     if ($message[2] != 'metadata' && $message[3] != 'provider') {
         return $host;
     }
@@ -370,7 +379,8 @@ function get_host_provider(array $host, array $message) {
  *
  * @example get_host_hostname($host, $message);
  */
-function get_host_hostname(array $host, array $message) {
+function get_host_hostname(array $host, array $message)
+{
     if ($message[2] != 'ssh-config') {
         return $host;
     }
@@ -403,7 +413,8 @@ function get_host_hostname(array $host, array $message) {
  *
  * @example get_host_identity_file($host, $message);
  */
-function get_host_identity_file(array $host, array $message) {
+function get_host_identity_file(array $host, array $message)
+{
     if ($message[2] != 'ssh-config') {
         return $host;
     }
@@ -440,7 +451,8 @@ function get_host_identity_file(array $host, array $message) {
  *
  * @example set_host_fqdn($host, $fqdnDomain = 'example.com');
  */
-function set_host_fqdn(array $host, $fqdnDomain) {
+function set_host_fqdn(array $host, $fqdnDomain)
+{
     if (! array_key_exists('hostname', $host) && empty($host['hostname'])) {
         return $host;
     }
@@ -479,7 +491,8 @@ function set_host_fqdn(array $host, $fqdnDomain) {
  *
  * @example make_groups_from_hosts($hosts);
  */
-function make_groups_from_hosts(array $hosts, $nameForManagerGroup = 'vagrant') {
+function make_groups_from_hosts(array $hosts, $nameForManagerGroup = 'vagrant')
+{
     $groups = [];
 
     $groups = make_manager_group($hosts, $groups, $nameForManagerGroup);
@@ -509,7 +522,8 @@ function make_groups_from_hosts(array $hosts, $nameForManagerGroup = 'vagrant') 
  *
  * @example make_manager_group($hosts, $groups, $manager = 'vagrant');
  */
-function make_manager_group(array $hosts, array $groups, $manager) {
+function make_manager_group(array $hosts, array $groups, $manager)
+{
     if (! array_key_exists($manager, $groups)) {
         $groups[$manager] = [];
     }
@@ -537,7 +551,8 @@ function make_manager_group(array $hosts, array $groups, $manager) {
  *
  * @example make_providers_group($hosts, $groups);
  */
-function make_providers_group(array $hosts, array $groups) {
+function make_providers_group(array $hosts, array $groups)
+{
     foreach ($hosts as $host) {
         if (array_key_exists('provider', $host)) {
             if (! array_key_exists($host['provider'], $groups)) {
@@ -569,7 +584,8 @@ function make_providers_group(array $hosts, array $groups) {
  *
  * @example make_wsr_1_element_groups($hosts, $groups);
  */
-function make_wsr_1_element_groups(array $hosts, array $groups) {
+function make_wsr_1_element_groups(array $hosts, array $groups)
+{
     $wsr1Elements = [
         'project',
         'environment',
@@ -630,7 +646,8 @@ function make_wsr_1_element_groups(array $hosts, array $groups) {
  *
  * @example make_inventory($hosts, $groups, $inventoryName = 'Vagrant');
  */
-function make_inventory(array $hosts, array $groups, $inventoryName) {
+function make_inventory(array $hosts, array $groups, $inventoryName)
+{
     $inventory = [];
 
     // Start with an introduction
@@ -666,7 +683,8 @@ function make_inventory(array $hosts, array $groups, $inventoryName) {
  *
  * @example make_inventory_introduction($inventoryName = 'Vagrant');
  */
-function make_inventory_introduction($inventoryName) {
+function make_inventory_introduction($inventoryName)
+{
     $inventory = [];
 
     $inventory[] = '# ' . $inventoryName . ' - Ansible dynamic inventory';
@@ -688,7 +706,8 @@ function make_inventory_introduction($inventoryName) {
  *
  * @example make_inventory_hosts($hosts);
  */
-function make_inventory_hosts(array $hosts) {
+function make_inventory_hosts(array $hosts)
+{
     $inventory = [];
 
     $inventory[] = "\n";
@@ -698,7 +717,7 @@ function make_inventory_hosts(array $hosts) {
         // Prefer a FQDN over a hostname and fall back to the machine name
         if (array_key_exists('fqdn', $hostDetails)) {
             $line = $hostDetails['fqdn'];
-        } else if (array_key_exists('hostname', $hostDetails)) {
+        } elseif (array_key_exists('hostname', $hostDetails)) {
             $line = $hostDetails['hostname'];
         } else {
             $line = $hostName;
@@ -728,13 +747,14 @@ function make_inventory_hosts(array $hosts) {
  *
  * @example make_inventory_groups($groups);
  */
-function make_inventory_groups($groups) {
+function make_inventory_groups($groups)
+{
     $inventory = [];
 
     $inventory[] = "\n";
     $inventory[] = '## Groups';
 
-    foreach($groups as $groupName => $groupMembers) {
+    foreach ($groups as $groupName => $groupMembers) {
         $inventory[] = '[' . $groupName . ']';
 
         // Merge in members (hosts or group names) of group - empty or falsy values are omitted
@@ -764,7 +784,8 @@ function make_inventory_groups($groups) {
  *
  * @example get_string_between('Foo Bar Baz', 'Foo', 'Baz');  // returns 'Bar'
  */
-function get_string_between($string, $start, $end){
+function get_string_between($string, $start, $end)
+{
     $string = ' ' . $string;
 
     $ini = strpos($string, $start);
@@ -789,7 +810,8 @@ function get_string_between($string, $start, $end){
  *
  * @example trim_string(' "foo" \n bar '); // returns 'foo bar'
  */
-function strip_string($string, $strip_quotes = true, $strip_newlines = true) {
+function strip_string($string, $strip_quotes = true, $strip_newlines = true)
+{
     if ($strip_quotes) {
         // Strip single or double quotes
         $string = str_replace('"', '', str_replace("'", "", $string));
@@ -826,7 +848,8 @@ function strip_string($string, $strip_quotes = true, $strip_newlines = true) {
  *
  * @example decode_wsr_1_hostname($hostname = 'pristine-wonderment-of-the-ages-dev-felnne-db1');
  */
-function decode_wsr_1_hostname($hostname) {
+function decode_wsr_1_hostname($hostname)
+{
     $project = null;
     $environment = null;
     $instance = null;
@@ -925,7 +948,8 @@ function decode_wsr_1_hostname($hostname) {
  *
  * @example decode_wsr_1_node_type($node);
  */
-function decode_wsr_1_node_type($nodeName) {
+function decode_wsr_1_node_type($nodeName)
+{
     if ($nodeName == null) {
         return false;
     }
@@ -948,4 +972,16 @@ function decode_wsr_1_node_type($nodeName) {
         'purpose' => $nodeElements[0],
         'index' => $nodeElements[1]
     ];
+}
+
+/**
+ * Generates a warning message string to be added to a set of warning messages
+ *
+ * @param string $warningMessage The contents of the warning message
+ * @param mixed $item An item that relates to the context of the warning message, it will be passed to var_export()
+ * @return string A warning string suitable for appending to an array of warning messages
+ */
+function make_warning($warningMessage, $item)
+{
+    return '[WARNING] ' . $warningMessage . var_export($item, $return = true);
 }
