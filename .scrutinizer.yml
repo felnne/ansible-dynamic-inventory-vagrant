@@ -1,0 +1,11 @@
+---
+# Configuration options for Scrutinizer CI
+
+tools:
+    php_code_sniffer:
+        config:
+            standard: "PSR2"
+    php_cs_fixer:
+      enabled: true
+      config: { level: psr2 }
+
