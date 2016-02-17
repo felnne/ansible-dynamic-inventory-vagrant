@@ -85,32 +85,45 @@ echo $inventory;
  * Functions
  */
 
-// Sets the working directory for this script, takes a $workDirectory to switch to
-// E.g. switch_to_working_directory('/srv/project/')
-//
-// TODO: Convert to DocBlock
+/**
+ * Sets the working directory for this script
+ *
+ * @param string $workingDirectory The working directory to switch to
+ * @return void
+ *
+ * @example switch_to_working_directory('/srv/project/');
+ */
 function switch_to_working_directory($workingDirectory) {
     chdir($workingDirectory);
 }
 
-// Calls the Vagrant 'ssh-config' command to get information on machines (hosts) defined, including their name/hostname,
-// provider (e.g. VMware) and the private key needed for SSH
-// Returns a string containing the 'stdout' output from this command - this will need to be further processed before
-// it can be used as input in this script using 'process_vagrant_output()'
-//
-// E.g. get_input_from_vagrant()
-//
-// TODO: Convert to DocBlock
+/**
+ * Calls Vagrant to discover information about running machines (hosts)
+ *
+ * Calls the Vagrant 'ssh-config' command to get information on machines (hosts) defined, including their name/hostname,
+ * provider (e.g. VMware) and the private key needed for SSH.
+ *
+ * @see process_vagrant_output() For how output from this function can be prepared as input into this script
+ *
+ * @return string Contains the 'stdout' from Vagrant, which consists of a number of potential messages
+ *
+ * @example get_input_from_vagrant();
+ */
 function get_input_from_vagrant() {
     return shell_exec('vagrant ssh-config --machine-readable');
 }
 
-// Takes raw stdout from Vagrant and converts it into a form that can be used as input for this script
-// Returns an array of potential Vagrant messages that can be fed into 'get_valid_messages()'
-//
-// E.g. process_vagrant_output($rawVagrantOutput)
-//
-// TODO: Convert to DocBlock
+/**
+ * Takes stdout from Vagrant and converts into potential messages
+ *
+ * @see get_input_from_vagrant() For getting Stdout from a Vagrant command
+ * @see get_valid_messages() For validating which potential messages are suitable for further processing
+ *
+ * @param string $rawVagrantOutput Stdout from Vagrant
+ * @return array An array of potential messages
+ *
+ * @example process_vagrant_output($rawVagrantOutput);
+ */
 function process_vagrant_output($rawVagrantOutput) {
     // Split Vagrant output into lines
     $arrayOfLines = explode("\n", $rawVagrantOutput);
@@ -124,16 +137,22 @@ function process_vagrant_output($rawVagrantOutput) {
     return $arrayOfLinesWithFields;
 }
 
-// Takes an array of $messages, and returns an array of those considered valid
-// Any messages which don't validate are discarded, unless $invalidAsWarnings is 'true' to return them as warnings
-//
-// Messages are considered valid if have 4 or more elements (timestamp, target, type and data) as per the format defined
-// by Vagrant - the validity/suitability of the elements within each message elements is checked elsewhere
-//
-// E.g. get_valid_messages($processedVagrantOutput)
-//
-// TODO: Convert to DocBlock
-function get_valid_messages($messages, $invalidAsWarnings = false) {
+/**
+ * For a set of Vagrant messages, returns only those considered valid
+ *
+ * Messages are considered valid if have 4 or more elements (timestamp, target, type and data) as per the format defined
+ * by Vagrant - the suitability of the elements within each message elements is checked elsewhere.
+ *
+ * @see https://www.vagrantup.com/docs/cli/machine-readable.html For information on the format of  Vagrant 'messages'
+ * @see get_host_specific_messages() For determining which valid messages are suitable for further processing
+ *
+ * @param array $messages A set of potential Vagrant messages to be validated
+ * @param bool $invalidAsWarnings If 'true', return invalid messages as warnings, otherwise they are discarded
+ * @return array A set of valid messages
+ *
+ * @example get_valid_messages($processedVagrantOutput);
+ */
+function get_valid_messages(array $messages, $invalidAsWarnings = false) {
     $validMessages = [];
 
     foreach($messages as $index => $message) {
@@ -147,16 +166,22 @@ function get_valid_messages($messages, $invalidAsWarnings = false) {
     return $validMessages;
 }
 
-// Takes an array of $messages, and returns an array of those which target a specific machine (host)
-// Any messages which aren't specific are discarded, unless $invalidAsWarnings is 'true' to return them as warnings
-//
-// Where a message is not specific to a host it is either an error, or a more general message, neither of which are of
-// use when building the inventory
-//
-// E.g. get_host_specific_messages($validMessages)
-//
-// TODO: Convert to DocBlock
-function get_host_specific_messages($messages, $nonSpecificAsWarnings = false) {
+/**
+ * For a set of Vagrant messages, returns only those which address a specific machine (host)
+ *
+ * A message is said to be non-specific when it does not refer to a specific machine (host), these include errors or a
+ * more general message.
+ *
+ * @see get_valid_messages() For determining the validity of messages
+ * @see get_interesting_messages() For determining which host specific messages are suitable for further processing
+ *
+ * @param array $messages A set of previously validated messages
+ * @param bool $nonSpecificAsWarnings If 'true', return non-specific messages as warnings, otherwise they are discarded
+ * @return array A set of messages which specify a specific host
+ *
+ * @example get_host_specific_messages($specificMessages);
+ */
+function get_host_specific_messages(array $messages, $nonSpecificAsWarnings = false) {
     $specificMessages = [];
 
     foreach($messages as $index => $message) {
@@ -171,21 +196,30 @@ function get_host_specific_messages($messages, $nonSpecificAsWarnings = false) {
     return $specificMessages;
 }
 
-// Takes an array of $messages, and returns an array of those that are of a type, and in some cases sub-type, that is
-// interesting or useful for building an Ansible inventory
-// Any messages which aren't interesting or useful are discarded, unless $nonInterestingAsWarnings is 'true' to return
-// them as warnings
-//
-// Message types are controlled values defined by Vagrant and are therefore predictable, the meaning of the data
-// elements(s) in a message are dictated by the message type. E.g. A 'metadata' type message uses 2 data elements.
-//
-// The message types this function considers interesting are set by '$interestingMessageTypes' and for metadata type
-// messages specifically, '$interestingMessageMetadataKeys' sets the metadata keys that are interesting for that type
-//
-// E.g. get_interesting_messages($specificMessages)
-//
-// TODO: Convert to DocBlock
-function get_interesting_messages($messages, $nonInterestingAsWarnings = false) {
+/**
+ * For a set of Vagrant messages, returns those only useful for building an inventory
+ *
+ * A message is said to be useful or interesting in this context if it contains information about the provider used for
+ * a host (e.g. VMware) or if it contains SSH configuration information such as the identity file to connect to a host.
+ *
+ * Vagrant uses a 'type' field with a set of controlled values allowing the type of message to be checked easily. Some
+ * message types use different formats for the remaining 'data' field(s) of a message, which can naturally be inferred
+ * from the message type.
+ *
+ * The types of message this function considers interesting are defined by '$interestingMessageTypes'. For 'metadata'
+ * type messages an additional '$interestingMessageMetadataKeys' variable is used for additional filtering.
+ *
+ * @see get_host_specific_messages() For determining which messages are specific to a host
+ * @see get_hosts_from_messages() For gathering any hosts specified in a set of messages
+ * @see get_host_details_from_messages() For gathering details about hosts specified in a set of messages
+ *
+ * @param array $messages A set of messages, ideally known to be specific to a host
+ * @param bool $nonInterestingAsWarnings If 'true', return non-interesting messages as warnings, otherwise they are discarded
+ * @return array A set of messages which are interesting for building an inventory
+ *
+ * @example get_interesting_messages($specificMessages);
+ */
+function get_interesting_messages(array $messages, $nonInterestingAsWarnings = false) {
     $interestingMessages = [];
     $interestingMessageTypes = [
         'metadata',
@@ -214,13 +248,22 @@ function get_interesting_messages($messages, $nonInterestingAsWarnings = false) 
     return $interestingMessages;
 }
 
-// Returns an array of hosts from the target host an array of $messages refers to
-// The hostname is used as the array key and once defined is not duplicated
-//
-// E.g. get_hosts_from_messages($interestingMessages)
-//
-// TODO: Convert to DocBlock
-function get_hosts_from_messages($messages) {
+/**
+ * For a set of Vagrant messages, returns a list of any of uniquely specified hosts
+ *
+ * Most vagrant messages are specific to a specific machine (host), for a set of messages this function will return an
+ * array of unique hosts. The name of each host will be used as a named index in the returned array, the value of each
+ * index is an empty array, designed to be populated with other information about each host.
+ *
+ * @see get_interesting_messages() For gathering a list of messages relatent to building an inventory
+ * @see get_host_details_from_messages() For populating a set of hosts from this function with additional information
+ *
+ * @param array $messages A set of messages which specify a host
+ * @return array An array with named index for each unique host, an empty array is set as the value for each index
+ *
+ * @example get_hosts_from_messages($interestingMessages);
+ */
+function get_hosts_from_messages(array $messages) {
     $hosts = [];
 
     foreach ($messages as $message) {
@@ -232,17 +275,34 @@ function get_hosts_from_messages($messages) {
     return $hosts;
 }
 
-// Updates an array of $hosts with information filled in from an array of $messages
-// Each item of information is decoded and added to a host using a separate function, which this function will call
-//
-// Some of these functions require additional information as this is not present in the information from messages
-// Consequently, these additional arguments will need to be passed to this function:
-// * $fqdnDomain - A domain name, needed to add Fully Qualified Domain Names to hosts, otherwise the hostname is used
-//
-// E.g. get_host_details_from_messages($hosts, $interestingMessages, $fqdnDomain = '.example.com')
-//
-// TODO: Convert to DocBlock
-function get_host_details_from_messages($hosts, $messages, $fqdnDomain = null) {
+/**
+ * Updates a set of hosts with information form a set of Vagrant messages
+ *
+ * The array of hosts passed to this function must use a host names as indexes and empty arrays as values.
+ * Each message is passed through a number of functions which can decode a specific piece of information for a specific
+ * kind of message. If the message is the right kind for a function it will update the relevant array for the host the
+ * message relates to.
+ *
+ * Additional functions create new information about a host, based on information gathered from messages combined with
+ * arguments to this function.
+ *
+ * @see get_hosts_from_messages() For gathering a list of hosts from a list of messages, formatted for this function
+ * @see get_interesting_messages() For gathering a list of messages relatent to building an inventory
+ * @see get_host_provider() For determining the provider for a host from a relevant Vagrant message
+ * @see get_host_hostname() For determining the hostname for a host from a relevant Vagrant message
+ * @see get_host_identity_file() For determining the identity file to connect to a host from a relevant Vagrant message
+ * @see set_host_fqdn() For constructing a Fully Qualified Domain Name from existing host information and a domain name
+ * @see make_groups_from_hosts() For creating groups based on characteristics about hosts and how they are managed
+ * @see make_inventory() For outputting host information in the Ansible inventory format
+ *
+ * @param array $hosts
+ * @param array $messages
+ * @param string $fqdnDomain
+ * @return array
+ *
+ * @example get_host_details_from_messages($hosts, $interestingMessages, $fqdnDomain = 'example.com');
+ */
+function get_host_details_from_messages(array $hosts, array $messages, $fqdnDomain = null) {
     foreach ($messages as $message) {
         // For each message select the host it refers to
         $host = $hosts[$message[1]];
@@ -263,12 +323,23 @@ function get_host_details_from_messages($hosts, $messages, $fqdnDomain = null) {
     return $hosts;
 }
 
-// Decodes the provider (e.g. 'VMware') for a $host from a suitable $message
-//
-// E.g. get_host_provider($host, $message)
-//
-// TODO: Convert to DocBlock
-function get_host_provider($host, $message) {
+/**
+ * Determines the provider for a host from a relevant Vagrant message
+ *
+ * The provider is the underlying platform or application that provides a host. Typically in the case of Vagrant, this
+ * is a hypervisor such as VMware or Virtualbox. Vagrant provides this information in a 'metadata' type message.
+ *
+ * Messages which don't refer to this specific piece of information will be ignored by this function.
+ *
+ * @see get_host_details_from_messages() For building up information about hosts using these sort of functions
+ *
+ * @param array $host The host the decoded provider refers to
+ * @param array $message A Vagrant message, ideally a metadata message of the relevant type
+ * @return array Where a provider is present in the message, an updated host, otherwise an unmodified host
+ *
+ * @example get_host_provider($host, $message);
+ */
+function get_host_provider(array $host, array $message) {
     if ($message[2] != 'metadata' && $message[3] != 'provider') {
         return $host;
     }
@@ -284,12 +355,24 @@ function get_host_provider($host, $message) {
     return $host;
 }
 
-// Decodes the hostname for a $host from a suitable $message
-//
-// E.g. get_host_hostname($host, $message)
-//
-// TODO: Convert to DocBlock
-function get_host_hostname($host, $message) {
+/**
+ * Determines the hostname for a host from a relevant Vagrant message
+ *
+ * The hostname is typically the same as the machine name in a Vagrantfile, but can be different. For an inventory the
+ * hostname is the required name in order for Ansible to connect to the host using SSH.  Vagrant provides this
+ * information in a 'ssh-config' type message.
+ *
+ * Messages which don't refer to this specific piece of information will be ignored by this function.
+ *
+ * @see get_host_details_from_messages() For building up information about hosts using these sort of functions
+ *
+ * @param array $host The host the decoded provider refers to
+ * @param array $message A Vagrant message, ideally a ssh-config message
+ * @return array Where a hostname is present in the message, an updated host, otherwise an unmodified host
+ *
+ * @example get_host_hostname($host, $message);
+ */
+function get_host_hostname(array $host, array $message) {
     if ($message[2] != 'ssh-config') {
         return $host;
     }
@@ -305,12 +388,24 @@ function get_host_hostname($host, $message) {
     return $host;
 }
 
-// Decodes the identity file (SSH private key) for a $host from a suitable $message
-//
-// E.g. get_host_identity_file($host, $message)
-//
-// TODO: Convert to DocBlock
-function get_host_identity_file($host, $message) {
+/**
+ * Determines the identity file for a host from a relevant Vagrant message
+ *
+ * The identity file is typically a randomly generated private key created by Vagrant when the host is first created.
+ * For an inventory the identity file is required in order for Ansible to connect to the host using SSH. Vagrant
+ * provides this information in a 'ssh-config' type message.
+ *
+ * Messages which don't refer to this specific piece of information will be ignored by this function.
+ *
+ * @see get_host_details_from_messages() For building up information about hosts using these sort of functions
+ *
+ * @param array $host The host the decoded provider refers to
+ * @param array $message A Vagrant message, ideally a ssh-config message
+ * @return array Where an identity file is present in the message, an updated host, otherwise an unmodified host
+ *
+ * @example get_host_identity_file($host, $message);
+ */
+function get_host_identity_file(array $host, array $message) {
     if ($message[2] != 'ssh-config') {
         return $host;
     }
@@ -326,12 +421,28 @@ function get_host_identity_file($host, $message) {
     return $host;
 }
 
-// Generates a Fully Qualified Domain Name for a $host from its hostname and a given domain name
-//
-// E.g. set_host_fqdn($host, '.example.com')
-//
-// TODO: Convert to DocBlock
-function set_host_fqdn($host, $fqdnDomain) {
+/**
+ * Constructs a Fully Qualified Domain Name (FQDN) for a host using a hostname and given domain name
+ *
+ * A FQDN is essentially a hostname followed by a domain name (e.g. hostname.domain.tld), anything after the first
+ * full stop, '.', is considered the domain name, anything before is considered the hostname.
+ *
+ * The domain name used can be any valid domain name, however it is strongly recommended to use a domain name you
+ * control, or that is reserved for internal/test purposes as per RFC 2606.
+ *
+ * If the hostname is not known for a host, the host is returned unmodified.
+ *
+ * @see get_host_details_from_messages() For building up information about hosts using these sort of functions
+ * @see get_host_hostname() For specifically determining the hostname for a host from a relevant Vagrant message
+ * @see https://tools.ietf.org/html/rfc2606 For a list of domain names and TLDs reserved for testing
+ *
+ * @param array $host The host the FQDN will apply to and which ideally contains a 'hostname' property
+ * @param string $fqdnDomain The domain name or TLD for use in constructing the FQDN
+ * @return array Where a host has a hostname, an updated host, otherwise an unmodified host
+ *
+ * @example set_host_fqdn($host, $fqdnDomain = 'example.com');
+ */
+function set_host_fqdn(array $host, $fqdnDomain) {
     if (! array_key_exists('hostname', $host) && empty($host['hostname'])) {
         return $host;
     }
@@ -342,17 +453,35 @@ function set_host_fqdn($host, $fqdnDomain) {
     return $host;
 }
 
-// Returns an array of $groups based on information from an array of $hosts
-// Each group is built using a separate function, which this function will call
-//
-// Some of these functions require additional information as this is not present in the information from hosts
-// Consequently, these additional arguments will need to be passed to this function:
-// * $manager - Needed to add groups for the host manager (e.g. Vagrant), defaults to 'vagrant'
-//
-// E.g. make_groups_from_hosts($hosts, $interestingMessages, $nameForManagerGroup = 'vagrant')
-//
-// TODO: Convert to DocBlock
-function make_groups_from_hosts($hosts, $nameForManagerGroup = 'vagrant') {
+/**
+ * Creates a series of groups for a set of hosts based on their characteristics and how they are managed
+ *
+ * Most of these groups are derived from information known about hosts (such as its provider). Other groups can be made
+ * using other criteria, for example grouping all hosts managed using Vagrant.
+ *
+ * Each group consists of a named index in an array, the value of each index is an array of host FQDNs.
+ * These groups are directly comparable to Ansible inventory groups and are used for this purpose.
+ *
+ * To build each group, hosts and other information, are passed to a number of functions, each responsible for creating
+ * a specific group or series of groups (provider groups for example).
+ *
+ * Note: The term 'group' is used to represent a grouping of hosts in an abstract way (but implemented using an array
+ * of named arrays), and in specifically in terms of Ansible inventory groups.
+ *
+ * @see get_hosts_from_messages() For gathering a list of hosts from a list of messages
+ * @see get_host_details_from_messages() For populating a set of hosts from with information from a list of messages
+ * @see make_manager_group() For creating groups based on the manager used for a host (e.g. Vagrant)
+ * @see make_providers_group() For creating groups based on the provider used for a host (e.g. VMware)
+ * @see make_wsr_1_element_groups() For creating groups based on hostname's formatted according to WSR-1
+ * @see make_inventory() For outputting group information in the Ansible inventory format
+ *
+ * @param array $hosts The set of hosts to be grouped
+ * @param string $nameForManagerGroup The name of the manager (e.g. vagrant) for a group based on how hosts are managed
+ * @return array The set of groups created
+ *
+ * @example make_groups_from_hosts($hosts);
+ */
+function make_groups_from_hosts(array $hosts, $nameForManagerGroup = 'vagrant') {
     $groups = [];
 
     $groups = make_manager_group($hosts, $groups, $nameForManagerGroup);
@@ -362,14 +491,27 @@ function make_groups_from_hosts($hosts, $nameForManagerGroup = 'vagrant') {
     return $groups;
 }
 
-// Creates a group, within an array of $groups, containing all $hosts, for a given $manager (e.g. 'vagrant')
-// I.e. all hosts are added to group named after a given manager
-// Returns the array of groups passed in, including the additional group created by this function
-//
-// E.g. make_manager_group($hosts, $groups, $manager = 'vagrant')
-//
-// TODO: Convert to DocBlock
-function make_manager_group($hosts, $groups, $manager) {
+/**
+ * Creates groups for a set of hosts based on how they are managed
+ *
+ * Each host uses a 'manager', which is usually Vagrant, this group will contain all hosts.
+ *
+ * This group is useful in environments where this inventory is one of many, and may therefore contain multiple
+ * managers, each with their own group containing hosts they manage.
+ *
+ * Note: Assumptions may be made as to the name of these management groups by other scripts of provisioning systems.
+ * It is therefore strongly advised to use any defaults offered for these groups.
+ *
+ * @see make_groups_from_hosts() For creating a series of groups for hosts using these sort of functions
+ *
+ * @param array $hosts The set of hosts to be grouped
+ * @param array $groups The set of groups this function will append any new groups to
+ * @param string $manager The name of the manager for the given hosts
+ * @return array If new groups were added, an updated set of groups, otherwise an unmodified set of groups
+ *
+ * @example make_manager_group($hosts, $groups, $manager = 'vagrant');
+ */
+function make_manager_group(array $hosts, array $groups, $manager) {
     if (! array_key_exists($manager, $groups)) {
         $groups[$manager] = [];
     }
@@ -381,14 +523,23 @@ function make_manager_group($hosts, $groups, $manager) {
     return $groups;
 }
 
-// Creates groups, within an array of $groups, for each host provider for an array of $hosts
-// I.e. all hosts using provider A are placed in a group for provider, all hosts using provider B etc.
-// Returns the array of groups passed in, including the additional groups created by this function
-//
-// E.g. make_providers_group($hosts, $groups)
-//
-// TODO: Convert to DocBlock
-function make_providers_group($hosts, $groups) {
+/**
+ * Creates groups for a set of hosts based on their provider
+ *
+ * Each host uses a 'provider', the underlying platform or application that provides a host. Typically in the case of
+ * Vagrant, this is a hypervisor such as VMware or Virtualbox.
+ *
+ * These groups are useful in environments where this inventory is one of many, and may therefore contain multiple
+ * providers (not typically local providers, but a mixture of local and remote providers for example), each with their
+ * own group containing hosts they 'provide for'.
+ *
+ * @param array $hosts The set of hosts to be grouped
+ * @param array $groups The set of groups this function will append any new groups to
+ * @return array If new groups were added, an updated set of groups, otherwise an unmodified set of groups
+ *
+ * @example make_providers_group($hosts, $groups);
+ */
+function make_providers_group(array $hosts, array $groups) {
     foreach ($hosts as $host) {
         if (array_key_exists('provider', $host)) {
             if (! array_key_exists($host['provider'], $groups)) {
@@ -402,14 +553,25 @@ function make_providers_group($hosts, $groups) {
     return $groups;
 }
 
-// Creates groups, within an array of $groups, for each element with a WSR-1 formatted hostname for an array of $hosts
-// I.e. if a host has a WSR-1 formatted hostname, groups for the elements in that hostname are created
-// Returns the array of groups passed in, including the additional groups created by this function
-//
-// E.g. make_wsr_1_element_groups($hosts, $groups)
-//
-// TODO: Convert to DocBlock
-function make_wsr_1_element_groups($hosts, $groups) {
+/**
+ * Creates groups for a set of hosts based on elements from WSR-1 formatted hostname's
+ *
+ * If a host uses a WSR-1 formatted hostname (such as 'foo-dev-web1'), groups can be made for the various elements
+ * that make up this hostname, such as Project ('foo'), Environment ('dev') and Purpose ('web').
+ *
+ * Where hosts, or a specific host, don't use such hostname's they are safely ignored by this function.
+ *
+ * These groups are useful in both environments with just this inventory, and as part of environments with multiple
+ * inventories, targeting different WSR-1 Environments for example (e.g. Development using Vagrant, Production using
+ * another manager/inventory).
+ *
+ * @param array $hosts The set of hosts to be grouped
+ * @param array $groups The set of groups this function will append any new groups to
+ * @return array If new groups were added, an updated set of groups, otherwise an unmodified set of groups
+ *
+ * @example make_wsr_1_element_groups($hosts, $groups);
+ */
+function make_wsr_1_element_groups(array $hosts, array $groups) {
     $wsr1Elements = [
         'project',
         'environment',
@@ -441,14 +603,36 @@ function make_wsr_1_element_groups($hosts, $groups) {
     return $groups;
 }
 
-// Builds an Ansible formatted inventory for an array of $hosts and $groups named with a specific $inventoryName
-// The inventory is built in sections, with each section using a separate function, called by this function
-// The inventory is built as an array but returned as a string by imploding the array with a new line character as glue
-//
-// E.g. make_inventory($hosts, $groups, $inventoryName = 'Vagrant');
-//
-// TODO: Convert to DocBlock
-function make_inventory($hosts, $groups, $inventoryName) {
+/**
+ * Creates an Ansible formatted inventory from a set of hosts and groups with a given name
+ *
+ * This function expects hosts to be structured as an array of named indexes containing an array of properties about
+ * each host (e.g. its Full Qualified Domain Name).
+ *
+ * This function expects groups to be structured as an array of named groups containing an array of hosts to be members
+ * of each group.
+ *
+ * This function is generic and does not assume an inventory is being generated for any specific purpose (e.g. this is
+ * not a function specific to building a Vagrant inventory). Therefore a descriptive name is required to identify the
+ * generated inventory.
+ *
+ * To build the inventory, hosts, groups and other information, are passed to a number of functions, each responsible
+ * for creating sections of the inventory (host definitions for example).
+ *
+ * @see get_host_details_from_messages() For building up information about hosts
+ * @see make_groups_from_hosts() For building up information about groups of hosts
+ * @see make_inventory_introduction() Outputs introductory comments for an inventory
+ * @see make_inventory_hosts() Outputs hosts definitions for a set of hosts
+ * @see make_inventory_groups() Outputs group definitions for a set of groups
+ *
+ * @param array $hosts A set of hosts, each containing properties about each host
+ * @param array $groups A set of groups
+ * @param string $inventoryName A descriptive name for this inventory, displayed in comments in the inventory
+ * @return string A constructed inventory file which can be safely echoed
+ *
+ * @example make_inventory($hosts, $groups, $inventoryName = 'Vagrant');
+ */
+function make_inventory(array $hosts, array $groups, $inventoryName) {
     $inventory = [];
 
     // Start with an introduction
@@ -470,12 +654,20 @@ function make_inventory($hosts, $groups, $inventoryName) {
     return $inventory;
 }
 
-// Outputs the $inventoryName of an inventory and other general information about dynamic inventories
-// This function is designed to be called by 'make_inventory()' and will return a partial inventory array
-//
-// E.g. make_inventory_introduction($inventoryName = 'Vagrant');
-//
-// TODO: Convert to DocBlock
+/**
+ * Makes introductory lines for the inventory as comments
+ *
+ * This is mostly a formality, stating the output is dynamic and should not be modified, and stating which inventory
+ * it is. Since these dynamic inventories are designed to be consumed by Ansible directly only minimal information is
+ * outputted. It is mainly intended for users when running the dynamic inventory from the command line for debugging.
+ *
+ * @see make_inventory() For building up an inventory using these sort of functions
+ *
+ * @param string $inventoryName The descriptive name for the inventory
+ * @return array A set of lines to be added to the inventory
+ *
+ * @example make_inventory_introduction($inventoryName = 'Vagrant');
+ */
 function make_inventory_introduction($inventoryName) {
     $inventory = [];
 
@@ -485,13 +677,20 @@ function make_inventory_introduction($inventoryName) {
     return $inventory;
 }
 
-// Outputs host information for an array of $hosts, including their FQDN (or hostname) and identity file
-// This function is designed to be called by 'make_inventory()' and will return a partial inventory array
-//
-// E.g. make_inventory_hosts($hosts);
-//
-// TODO: Convert to DocBlock
-function make_inventory_hosts($hosts) {
+/**
+ * Makes host definition lines for the inventory for a set of hosts
+ *
+ * These definitions consist of the hostname and the identity file Ansible requires to connect to a host. The hostname
+ * is either the FQDN (if specified, preferred), the hostname (if specified) or the name of the host given by Vagrant.
+ *
+ * @see make_inventory() For building up an inventory using these sort of functions
+ *
+ * @param array $hosts A set of hosts to be defined within the inventory
+ * @return array A set of lines to be added to the inventory
+ *
+ * @example make_inventory_hosts($hosts);
+ */
+function make_inventory_hosts(array $hosts) {
     $inventory = [];
 
     $inventory[] = "\n";
@@ -516,12 +715,19 @@ function make_inventory_hosts($hosts) {
     return $inventory;
 }
 
-// Outputs group information for an array of $groups
-// This function is designed to be called by 'make_inventory()' and will return a partial inventory array
-//
-// E.g. make_inventory_groups($groups);
-//
-// TODO: Convert to DocBlock
+/**
+ * Makes group definition lines for the inventory for a set of groups
+ *
+ * These definitions consist of the name of the group, followed by the members of that group. Each group is separated
+ * with a new line character to improve readability.
+ *
+ * @see make_inventory() For building up an inventory using these sort of functions
+ *
+ * @param array $groups A set of groups to be defined within the inventory
+ * @return array A set of lines to be added to the inventory
+ *
+ * @example make_inventory_groups($groups);
+ */
 function make_inventory_groups($groups) {
     $inventory = [];
 
@@ -548,11 +754,16 @@ function make_inventory_groups($groups) {
  * Utility functions
  */
 
-// Takes an input $string, and returns the substring between a $start string and a $end string
-// E.g. get_string_between('Foo Bar Baz', 'Foo', 'Baz') returns ' Bar ')
-// It is recommended to trim the return value of this function to remove leading/trailing spaces
-//
-// TODO: Convert to DocBlock
+/**
+ * Gets the substring between, and not including, a start and end string
+ *
+ * @param string $string The complete string, which contains the start/end strings and desired sub-string in between
+ * @param string $start The string that defines the start of the desired substring, but is not part of the substring
+ * @param string $end The string that defines the end of the desired substring, but is not part of the substring
+ * @return string The desired substring, or an empty string if the start string is not found in the complete string
+ *
+ * @example get_string_between('Foo Bar Baz', 'Foo', 'Baz');  // returns 'Bar'
+ */
 function get_string_between($string, $start, $end){
     $string = ' ' . $string;
     $ini = strpos($string, $start);
@@ -562,12 +773,16 @@ function get_string_between($string, $start, $end){
     return substr($string, $ini, $len);
 }
 
-// Takes an input $string, and returns it without leading/trailing spaces, and optionally, without single/double quotes
-// or new lines
-// Quote and new line stripping are enabled by default
-// E.g. trim_string(' "foo" \n bar ') returns 'foo bar'
-//
-// TODO: Convert to DocBlock
+/**
+ * Removes leading/trailing spaces and optionally, single/double quotes and newlines from a string
+ *
+ * @param string $string The string to be 'stripped'
+ * @param bool $strip_quotes If 'true' single or double quotes will be removed, 'true' by default
+ * @param bool $strip_newlines If 'true' new line characters will be removed, 'true' by default
+ * @return string The 'stripped' string
+ *
+ * @example trim_string(' "foo" \n bar '); // returns 'foo bar'
+ */
 function strip_string($string, $strip_quotes = true, $strip_newlines = true) {
     if ($strip_quotes) {
         // Strip single or double quotes
@@ -583,22 +798,28 @@ function strip_string($string, $strip_quotes = true, $strip_newlines = true) {
     return ltrim(rtrim($string));
 }
 
-// Takes an input $hostname and determines if it is compliant with the WSR-1 hostname naming convention
-// If it is details on the project, environment, instance (if applicable) and node will be returned
-// If the hostname is not WSR-1 compliant a value of 'false' will be returned
-// If any element is not defined, a null value will be set for that element
-//
-// E.g. decode_wsr_1_hostname('pristine-wonderment-of-the-ages-dev-felnne-db1') returns:
-// (Array - [Key] = value)
-//  [project]     = pristine-wonderment-of-the-ages
-//  [environment] = dev
-//  [instance]    = felnne
-//  [node]        = db1
-//  [purpose]     = db
-//  [index]       = 1
-//
-// TODO: Convert to DocBlock
-// TODO: Refactor this
+/**
+ * Attempts to decode a WSR-1 formatted hostname return its separate elements
+ *
+ * A WSR-1 formatted hostname such as 'pristine-wonderment-of-the-ages-dev-felnne-db1' will be split into its elements:
+ * - Project     'pristine-wonderment-of-the-ages'
+ * - Environment 'dev'
+ * - Instance    'felnne'
+ * - node        'db1'
+ * - purpose     'db'
+ * - index       '1'
+ *
+ * Non-optional elements that can't be found in a hostname will cause this function to fail and return an error.
+ * Optional elements that can't be found in a hostname will be returned as 'null' values.
+ * Hostname's which are not found to be WSR-1 compliant will cause this function to fail and return an error.
+ *
+ * @see decode_wsr_1_node_type() For how to decode the Node element into its sub-elements
+ *
+ * @param string $hostname The hostname to decode
+ * @return array|bool The elements of the hostname which could be decoded, or 'false' if an error occurred
+ *
+ * @example decode_wsr_1_hostname($hostname = 'pristine-wonderment-of-the-ages-dev-felnne-db1');
+ */
 function decode_wsr_1_hostname($hostname) {
     $project = null;
     $environment = null;
@@ -684,16 +905,21 @@ function decode_wsr_1_hostname($hostname) {
     return $output;
 }
 
-// Takes an input $nodeName and if it is compliant with the WSR-1 hostname naming convention returns the name/purpose
-// (database server) of a node, and its index (3rd database server)
-// If the node name is not WSR-1 compliant a vale of 'false' will be returned
-//
-// E.g. decode_wsr_1_node('db1') returns:
-// (Array - [Key] = value)
-//  [purpose]     = db
-//  [index]       = 1
-//
-// TODO: Convert to DocBlock
+/**
+ * Attempts to decode a node element from a WSR-1 formatted hostname and return its separate sub-elements
+ *
+ * A WSR-1 formatted hostname contains a 'Node' element, this is made up of a Purpose and an Index sub-element.
+ * A node such as 'db1' will be split into its sub-elements:
+ * - Purpose 'db'
+ * - Index   '1'
+ *
+ * @see decode_wsr_1_hostname() For how to decode a WSR-1 hostname into its elements for this function
+ *
+ * @param string $nodeName The Node to decode
+ * @return array|bool The sub-elements of the Node, or 'false' if an error occurred
+ *
+ * @example decode_wsr_1_node_type($node);
+ */
 function decode_wsr_1_node_type($nodeName) {
     if ($nodeName == null) {
         return false;
