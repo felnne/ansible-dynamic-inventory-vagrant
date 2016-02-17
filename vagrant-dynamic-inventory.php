@@ -79,8 +79,6 @@ $inventory = make_inventory($hosts, $groups, $inventoryName = 'vagrant');
  */
 echo $inventory;
 
-
-
 /*
  * Functions
  */
@@ -697,9 +695,11 @@ function make_inventory_hosts(array $hosts) {
     $inventory[] = '## Hosts';
 
     foreach ($hosts as $hostName => $hostDetails) {
-        // Prefer a FQDN over a hostname
+        // Prefer a FQDN over a hostname and fall back to the machine name
         if (array_key_exists('fqdn', $hostDetails)) {
             $line = $hostDetails['fqdn'];
+        } else if (array_key_exists('hostname', $hostDetails)) {
+            $line = $hostDetails['hostname'];
         } else {
             $line = $hostName;
         }
@@ -766,10 +766,16 @@ function make_inventory_groups($groups) {
  */
 function get_string_between($string, $start, $end){
     $string = ' ' . $string;
+
     $ini = strpos($string, $start);
-    if ($ini == 0) return '';
+
+    if ($ini == 0) {
+        return '';
+    }
+
     $ini += strlen($start);
     $len = strpos($string, $end, $ini) - $ini;
+
     return substr($string, $ini, $len);
 }
 
@@ -856,7 +862,6 @@ function decode_wsr_1_hostname($hostname) {
     }
 
     // Second find which environment is used and where is appears in the array
-    // TODO: Replace with map()?
     $environmentIndex = false;
     foreach ($validEnvironments as $validEnvironment) {
         $environmentIndexInstance = array_search($validEnvironment, $elements);
