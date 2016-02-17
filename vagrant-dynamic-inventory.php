@@ -7,10 +7,15 @@
  * of the current Vagrant environment is returned.
  *
  * Maintainer: Felix Fennell <felnne@bas.ac.uk>, Web & Applications Team <webapps@bas.ac.uk>, British Antarctic Survey
+ * Source: https://github.com/felnne/ansible-dynamic-inventory-vagrant
  *
  * Note: This script is a proof-of-concept!
  * Note: A Vagrant environment needs to be running before running this script (i.e. you've already run '$ vagrant up')
  * Note: If you want to see what this inventory will look like you can run this script directly.
+ *
+ * Copyright: NERC-BAS 2016
+ * License: MIT license
+ * See the README.md file for more copyright and licensing information
 */
 
 /*
