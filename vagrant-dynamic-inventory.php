@@ -19,6 +19,11 @@
 */
 
 /*
+ * Start up - Start script timer
+ */
+$timeStart = microtime(true);
+
+/*
  * Initialisation - Set up key data-structures
  */
 
@@ -83,6 +88,16 @@ $inventory = make_inventory($hosts, $groups, $inventoryName = 'vagrant');
  * Inventory output
  */
 echo $inventory;
+
+/*
+ * Shutdown - Stop script timer and display result
+ */
+$timeEnd = microtime(true);
+$timeTaken = $timeEnd - $timeStart;
+echo '# [NOTICE] Inventory generated in ' . round($timeTaken, 3) . ' seconds';
+
+// End on a new line
+echo "\n";
 
 /*
  * Functions
