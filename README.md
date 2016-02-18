@@ -48,6 +48,12 @@ pristine-dev-node1.v.m
 pristine-dev-node1.v.m
 ```
 
+## Requirements
+
+* PHP 5.3 +
+
+* An existing Vagrant environment
+
 ## Installation
 
 Place `vagrant-dynamic-inventory.php` in a suitable location in your project, e.g. `provisioning/inventories`.
@@ -70,9 +76,9 @@ Edit `vagrant-dynamic-inventory.php`, and change the following variables as need
 
 * `$debug` (bool) - Provide extra information on how input from Vagrant is used in the script
 
-Note: An INI file will be used for this in future.
+**Note:** An INI file will be used for this in future.
 
-Note: If `$debug == true` the output of this script will not be a valid Ansible inventory.
+**Note:** If `$debug == true` the output of this script will not be a valid Ansible inventory.
 
 ### Configure Ansible
 
@@ -114,7 +120,7 @@ Now each time Ansible is run, the dynamic inventory script will be called by Ans
 Vagrant and provide this to Ansible. No inventory file will be saved by this script, though you can do this for testing
 purposes if desired.
 
-**Note:** It is assumed you have already have a Vagrant environment and that its machines are running.
+**Note:** Vagrant must be running for this script to work
 
 To see what this script produces you can run it directly:
 
