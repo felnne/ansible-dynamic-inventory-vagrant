@@ -44,9 +44,8 @@ $workingDirectory = '/Users/felnne/Projects/WebApps/Web-Applications-Project-Tem
 // When building details on hosts a Fully Qualified Domain Name is built using the hostname from Vagrant and this value
 $fqdnDomain = '.v.m';
 
-// Hold any errors or warnings encountered
-// Fatal errors will be returned immediately, otherwise they will be returned at the end as comments in the inventory
-$warnings = [];
+// Flags for whether debug messages should be reported
+$debug = false;
 
 /*
  * Initialisation - Switch to working directory
@@ -64,9 +63,9 @@ $processedVagrantOutput = process_vagrant_output($rawVagrantOutput);
  * Message validation - check each 'message' is valid and from these select only those we are interested in
  * Note: The format of messages is controlled by Vagrant: https://www.vagrantup.com/docs/cli/machine-readable.html
  */
-$validMessages = get_valid_messages($processedVagrantOutput);
-$specificMessages = get_host_specific_messages($validMessages);
-$interestingMessages = get_interesting_messages($specificMessages);
+$validMessages = get_valid_messages($processedVagrantOutput, $debug);
+$specificMessages = get_host_specific_messages($validMessages, $debug);
+$interestingMessages = get_interesting_messages($specificMessages, $debug);
 
 /*
  * Message processing - use the data in each message to build up information on hosts and groups for the inventory
@@ -168,20 +167,20 @@ function process_vagrant_output($rawVagrantOutput)
  * @see get_host_specific_messages() For determining which valid messages are suitable for further processing
  *
  * @param array $messages A set of potential Vagrant messages to be validated
- * @param bool $invalidAsWarnings If 'true', return invalid messages as warnings, otherwise they are discarded
+ * @param bool $debug If 'true', return information on invalid messages, otherwise they are discarded
  * @return array A set of valid messages
  *
  * @example get_valid_messages($processedVagrantOutput);
  */
-function get_valid_messages(array $messages, $invalidAsWarnings = false)
+function get_valid_messages(array $messages, $debug = false)
 {
     $validMessages = [];
 
     foreach ($messages as $index => $message) {
         if (count($message) >= 4) {
             $validMessages[] = $message;
-        } elseif ($invalidAsWarnings) {
-            $warnings[] = '[WARNING] Message: ' . $index . ' invalid - ' . var_export($message, $return = true);
+        } elseif ($debug) {
+            echo make_debug('Message: ' . $index . ' invalid - ', $item = $message);
         }
     }
 
@@ -198,12 +197,12 @@ function get_valid_messages(array $messages, $invalidAsWarnings = false)
  * @see get_interesting_messages() For determining which host specific messages are suitable for further processing
  *
  * @param array $messages A set of previously validated messages
- * @param bool $nonSpecificAsWarnings If 'true', return non-specific messages as warnings, otherwise they are discarded
+ * @param bool $debug If 'true', return information on non-specific messages, otherwise they are discarded
  * @return array A set of messages which specify a specific host
  *
  * @example get_host_specific_messages($specificMessages);
  */
-function get_host_specific_messages(array $messages, $nonSpecificAsWarnings = false)
+function get_host_specific_messages(array $messages, $debug = false)
 {
     $specificMessages = [];
 
@@ -211,8 +210,8 @@ function get_host_specific_messages(array $messages, $nonSpecificAsWarnings = fa
         // In the Vagrant machine readable format, $message[1] is possibly the host a message belongs to
         if (! empty($message[1])) {
             $specificMessages[] = $message;
-        } elseif ($nonSpecificAsWarnings) {
-            $warnings[] = make_warning('Message: ' . $index . ' not specific to a host - ', $item = $message);
+        } elseif ($debug) {
+            echo make_debug('Message: ' . $index . ' not specific to a host - ', $item = $message);
         }
     }
 
@@ -237,12 +236,12 @@ function get_host_specific_messages(array $messages, $nonSpecificAsWarnings = fa
  * @see get_host_details_from_messages() For gathering details about hosts specified in a set of messages
  *
  * @param array $messages A set of messages, ideally known to be specific to a host
- * @param bool $nonInterestingAsWarnings If 'true', return non-interesting messages as warnings, otherwise discarded
+ * @param bool $debug If 'true', return information on non-interesting messages, otherwise they are discarded
  * @return array A set of messages which are interesting for building an inventory
  *
  * @example get_interesting_messages($specificMessages);
  */
-function get_interesting_messages(array $messages, $nonInterestingAsWarnings = false)
+function get_interesting_messages(array $messages, $debug = false)
 {
     $interestingMessages = [];
     $interestingMessageTypes = [
@@ -261,11 +260,11 @@ function get_interesting_messages(array $messages, $nonInterestingAsWarnings = f
                 $interestingMessages[] = $message;
             } elseif ($message[2] == 'ssh-config') {
                 $interestingMessages[] = $message;
-            } elseif ($nonInterestingAsWarnings) {
-                $warnings[] = make_warning('Message: ' . $index . ' non-interesting metadata key - ', $item = $message);
+            } elseif ($debug) {
+                echo make_debug('Message: ' . $index . ' non-interesting metadata key - ', $item = $message);
             }
-        } elseif ($nonInterestingAsWarnings) {
-            $warnings[] = make_warning('Message: ' . $index . ' non-interesting message type - ', $item = $message);
+        } elseif ($debug) {
+            echo make_debug('Message: ' . $index . ' non-interesting message type - ', $item = $message);
         }
     }
 
@@ -995,13 +994,13 @@ function decode_wsr_1_node_type($nodeName)
 }
 
 /**
- * Generates a warning message string to be added to a set of warning messages
+ * Generates a debug message string to aid in diagnosing script errors
  *
- * @param string $warningMessage The contents of the warning message
- * @param mixed $item An item that relates to the context of the warning message, it will be passed to var_export()
- * @return string A warning string suitable for appending to an array of warning messages
+ * @param string $message A descriptive, but concise description of the message
+ * @param mixed $item An item that relates to the context of the debug message, it will be passed to var_export()
+ * @return string An output string suitable for echoing out
  */
-function make_warning($warningMessage, $item)
+function make_debug($message, $item)
 {
-    return '[WARNING] ' . $warningMessage . var_export($item, $return = true);
+    return '[DEBUG] ' . $message . var_export($item, $return = true) . "\n";
 }
