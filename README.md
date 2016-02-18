@@ -48,7 +48,7 @@ pristine-dev-node1.v.m
 pristine-dev-node1.v.m
 ```
 
-## Usage
+## Installation
 
 Place `vagrant-dynamic-inventory.php` in a suitable location in your project, e.g. `provisioning/inventories`.
 
@@ -58,6 +58,24 @@ Make sure to grant execute permissions to the script:
 $ chmod +x provisioning/inventories/vagrant-dynamic-inventory.php
 ```
 
+## Setup
+
+### Configure script
+
+Edit `vagrant-dynamic-inventory.php`, and change the following variables as needed:
+
+* `$$workingDirectory` (string) - Path that contains the 'Vagrantfile' to be used as the input for this script
+
+* `$fqdnDomain` (string) - For building Fully Qualified Domain Names, the domain name to append to each hostname
+
+* `$debug` (bool) - Provide extra information on how input from Vagrant is used in the script
+
+Note: An INI file will be used for this in future.
+
+Note: If `$debug == true` the output of this script will not be a valid Ansible inventory.
+
+### Configure Ansible
+
 Configure Ansible to use this inventory, either using a project `ansible.cfg` file:
 
 ```ini
@@ -65,7 +83,7 @@ Configure Ansible to use this inventory, either using a project `ansible.cfg` fi
 inventory = provisioning/inventories/vagrant-dynamic-inventory.php
 ```
 
-Or pas the location on the command line:
+Or pass the location on the command line:
 
 ```
 $ ansible-playbook -i provisioning/inventories/vagrant-dynamic-inventory.php playbook.yml
@@ -90,6 +108,8 @@ $ ansible-playbook -i provisioning/inventories/ playbook.yml
 Ansible has more general information on [Ansible inventories](http://docs.ansible.com/ansible/intro_inventory.html) 
 and [dynamic inventories](http://docs.ansible.com/ansible/intro_dynamic_inventory.html) if needed.
 
+## Usage
+
 Now each time Ansible is run, the dynamic inventory script will be called by Ansible. This will get information from
 Vagrant and provide this to Ansible. No inventory file will be saved by this script, though you can do this for testing
 purposes if desired.
@@ -103,10 +123,6 @@ $ php provisioning/inventories/vagrant-dynamic-inventory.php
 ```
 
 ### WSR-1 hostnames
-
-TODO.
-
-## Configuration
 
 TODO.
 

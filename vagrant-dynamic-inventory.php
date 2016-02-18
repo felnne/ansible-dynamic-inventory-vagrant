@@ -33,14 +33,23 @@ $hosts = [];
 $groups = [];
 // Hold the contents of the dynamic inventory
 $inventory = [];
+
+/*
+ * Initialisation - Define script settings / options
+ * TODO: Read from INI file
+ */
+
 // Back up of the initial working directory this script was ran in - in case this is needed in the future
 $startupWorkingDirectory = getcwd();
-// This needs to be path that contains the 'Vagrantfile' to be used as the input for this script
+
+// This needs to be the path that contains the 'Vagrantfile' to be used as the input for this script
 // Typically this script will be in 'provisioning/inventories and the 'Vagrantfile' in the project root
 // The default for this variable switches to the project root so the 'Vagrantfile' is accessible
 $workingDirectory = '../../';
+
 // DEBUG - Override
 $workingDirectory = '/Users/felnne/Projects/WebApps/Web-Applications-Project-Template/';
+
 // When building details on hosts a Fully Qualified Domain Name is built using the hostname from Vagrant and this value
 $fqdnDomain = '.v.m';
 
@@ -81,7 +90,7 @@ $groups = make_groups_from_hosts($hosts);
 /*
  * Inventory construction - format the relevant information on hosts and groups into an Ansible compatible inventory
  */
-$inventory = make_inventory($hosts, $groups, $inventoryName = 'vagrant');
+$inventory = make_inventory($hosts, $groups, $inventoryName = 'Vagrant');
 
 /*
  * Inventory output
@@ -670,7 +679,7 @@ function make_inventory(array $hosts, array $groups, $inventoryName)
     $inventory = [];
 
     // Start with an introduction
-    $inventory = array_merge($inventory, make_inventory_introduction($inventoryName));
+    $inventory = array_merge($inventory, make_introduction($inventoryName));
 
     // Next add host information
     // (fqdn & identity file)
@@ -702,7 +711,7 @@ function make_inventory(array $hosts, array $groups, $inventoryName)
  *
  * @example make_inventory_introduction($inventoryName = 'Vagrant');
  */
-function make_inventory_introduction($inventoryName)
+function make_introduction($inventoryName)
 {
     $inventory = [];
 
