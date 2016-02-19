@@ -1,3 +1,5 @@
+#!/usr/bin/env php
+
 <?php
 
 /*
@@ -27,6 +29,8 @@ $timeStart = microtime(true);
  * Initialisation - Set up key data-structures
  */
 
+// Hold options for this script
+$options = [];
 // Hold information about hosts and how to connect to them - used to build host information in the dynamic inventory
 $hosts = [];
 // Hold information how hosts can be grouped together - used to build group information in the dynamic inventory
@@ -35,32 +39,32 @@ $groups = [];
 $inventory = [];
 
 /*
- * Initialisation - Define script settings / options
- * TODO: Read from INI file
+ * Initialisation - Set default script settings / options
  */
+$defaultOptions = [
+    'working_directory' => '../..',
+    'fqdn_domain' => '.test',
+    'debug' => false
+];
 
-// Back up of the initial working directory this script was ran in - in case this is needed in the future
-$startupWorkingDirectory = getcwd();
+/*
+ * Initialisation - Load script settings / options from INI configuration file
+ */
+$options = array_merge($defaultOptions, parse_ini_file("vagrant-dynamic-inventory.ini"));
 
-// This needs to be the path that contains the 'Vagrantfile' to be used as the input for this script
-// Typically this script will be in 'provisioning/inventories and the 'Vagrantfile' in the project root
-// The default for this variable switches to the project root so the 'Vagrantfile' is accessible
-$workingDirectory = '../../';
-
-// DEBUG - Override
-$workingDirectory = '/Users/felnne/Projects/WebApps/Web-Applications-Project-Template/';
-
-// When building details on hosts a Fully Qualified Domain Name is built using the hostname from Vagrant and this value
-$fqdnDomain = '.v.m';
-
-// Flags for whether debug messages should be reported
-$debug = false;
+if ($options['debug']) {
+    echo "[DEBUG] Resolved settings/options";
+    var_dump($options);
+}
 
 /*
  * Initialisation - Switch to working directory
  */
 
-switch_to_working_directory($workingDirectory);
+// Back up of the initial working directory this script was ran in - in case this is needed in the future
+$startupWorkingDirectory = getcwd();
+
+switch_to_working_directory($options['working_directory']);
 
 /*
  * Message input - use Vagrant to generate script input and split this into 'messages' of information
@@ -72,9 +76,9 @@ $processedVagrantOutput = process_vagrant_output($rawVagrantOutput);
  * Message validation - check each 'message' is valid and from these select only those we are interested in
  * Note: The format of messages is controlled by Vagrant: https://www.vagrantup.com/docs/cli/machine-readable.html
  */
-$validMessages = get_valid_messages($processedVagrantOutput, $debug);
-$specificMessages = get_host_specific_messages($validMessages, $debug);
-$interestingMessages = get_interesting_messages($specificMessages, $debug);
+$validMessages = get_valid_messages($processedVagrantOutput, $options['debug']);
+$specificMessages = get_host_specific_messages($validMessages, $options['debug']);
+$interestingMessages = get_interesting_messages($specificMessages, $options['debug']);
 
 /*
  * Message processing - use the data in each message to build up information on hosts and groups for the inventory
@@ -82,7 +86,7 @@ $interestingMessages = get_interesting_messages($specificMessages, $debug);
 
 // Build up host information
 $hosts = get_hosts_from_messages($interestingMessages);
-$hosts = get_host_details_from_messages($hosts, $interestingMessages, $fqdnDomain);
+$hosts = get_host_details_from_messages($hosts, $interestingMessages, $options['fqdn_domain']);
 
 // Build up group information
 $groups = make_groups_from_hosts($hosts);
@@ -90,7 +94,7 @@ $groups = make_groups_from_hosts($hosts);
 /*
  * Inventory construction - format the relevant information on hosts and groups into an Ansible compatible inventory
  */
-$inventory = make_inventory($hosts, $groups, $inventoryName = 'Vagrant');
+$inventory = make_inventory($hosts, $groups, $inventoryName = 'Vagrant', $source = getcwd() . '/' . 'Vagrantfile');
 
 /*
  * Inventory output
@@ -108,21 +112,8 @@ echo '# [NOTICE] Inventory generated in ' . round($timeTaken, 3) . ' seconds';
 echo "\n";
 
 /*
- * Functions
+ * Script Functions
  */
-
-/**
- * Sets the working directory for this script
- *
- * @param string $workingDirectory The working directory to switch to
- * @return void
- *
- * @example switch_to_working_directory('/srv/project/');
- */
-function switch_to_working_directory($workingDirectory)
-{
-    chdir($workingDirectory);
-}
 
 /**
  * Calls Vagrant to discover information about running machines (hosts)
@@ -656,7 +647,7 @@ function make_wsr_1_element_groups(array $hosts, array $groups)
  *
  * This function is generic and does not assume an inventory is being generated for any specific purpose (e.g. this is
  * not a function specific to building a Vagrant inventory). Therefore a descriptive name is required to identify the
- * generated inventory.
+ * generated inventory, and a source is required to describe where the input for the script came from.
  *
  * To build the inventory, hosts, groups and other information, are passed to a number of functions, each responsible
  * for creating sections of the inventory (host definitions for example).
@@ -670,16 +661,17 @@ function make_wsr_1_element_groups(array $hosts, array $groups)
  * @param array $hosts A set of hosts, each containing properties about each host
  * @param array $groups A set of groups
  * @param string $inventoryName A descriptive name for this inventory, displayed in comments in the inventory
+ * @param string $source The input used for creating an inventory
  * @return string A constructed inventory file which can be safely echoed
  *
  * @example make_inventory($hosts, $groups, $inventoryName = 'Vagrant');
  */
-function make_inventory(array $hosts, array $groups, $inventoryName)
+function make_inventory(array $hosts, array $groups, $inventoryName, $source)
 {
     $inventory = [];
 
     // Start with an introduction
-    $inventory = array_merge($inventory, make_introduction($inventoryName));
+    $inventory = array_merge($inventory, make_introduction($inventoryName, $source));
 
     // Next add host information
     // (fqdn & identity file)
@@ -701,22 +693,25 @@ function make_inventory(array $hosts, array $groups, $inventoryName)
  * Makes introductory lines for the inventory as comments
  *
  * This is mostly a formality, stating the output is dynamic and should not be modified, and stating which inventory
- * it is. Since these dynamic inventories are designed to be consumed by Ansible directly only minimal information is
- * outputted. It is mainly intended for users when running the dynamic inventory from the command line for debugging.
+ * it is and where the data came from. Since these dynamic inventories are designed to be consumed by Ansible directly
+ * only minimal information is outputted. It is mainly intended for users when running the dynamic inventory from the
+ * command line for debugging.
  *
  * @see make_inventory() For building up an inventory using these sort of functions
  *
  * @param string $inventoryName The descriptive name for the inventory
+ * @param string $source The input used for creating an inventory
  * @return array A set of lines to be added to the inventory
  *
  * @example make_inventory_introduction($inventoryName = 'Vagrant');
  */
-function make_introduction($inventoryName)
+function make_introduction($inventoryName, $source)
 {
     $inventory = [];
 
     $inventory[] = '# ' . $inventoryName . ' - Ansible dynamic inventory';
     $inventory[] = '# The contents of this inventory are generated by a script, do not modify manually';
+    $inventory[] = '# Source: ' . $source;
 
     return $inventory;
 }
@@ -801,6 +796,19 @@ function make_inventory_groups($groups)
 /*
  * Utility functions
  */
+
+/**
+ * Sets the working directory for this script
+ *
+ * @param string $workingDirectory The working directory to switch to
+ * @return void
+ *
+ * @example switch_to_working_directory('/srv/project/');
+ */
+function switch_to_working_directory($workingDirectory)
+{
+    chdir($workingDirectory);
+}
 
 /**
  * Gets the substring between, and not including, a start and end string
